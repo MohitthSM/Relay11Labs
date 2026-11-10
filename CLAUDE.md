@@ -1,0 +1,184 @@
+# CLAUDE.md: Relay
+
+Relay is a context-aware PA system for transport hubs, built as a pitch demo for ElevenLabs. Operational events become fact-locked, on-brand, multilingual announcements that are voiced by ElevenLabs and repeated in zones by a scheduler.
+
+**Read before working:**
+- `SPEC.md` (what and why)
+- `ARCHITECTURE.md` (how, and the design decisions D1–D14)
+- `PLAN.md` (which phase we are in)
+
+Do not contradict a decision in ARCHITECTURE.md silently. If a change needs one, update the doc in the same change and say so.
+
+## Hard constraints (never break these)
+
+1. **Fact lock.**
+   - A generated script may contain only facts present in the event payload: times, platforms, gates, stands, names, flight numbers, routes, lines, stations, causes, statuses.
+   - The LLM writes `{placeholders}`, and code fills them.
+   - Any violation means the script is rejected, retried once on the escalation model, and then replaced by the deterministic template for that language.
+   - Never weaken a fact-lock check to make a test or demo pass. Add a lexicon or gazetteer entry, or a template, instead.
+2. **Mock mode everywhere.**
+   - Every LLM and TTS call goes through a provider Protocol (`relay/providers/`) that has a mock implementation which works with no API keys and no network.
+   - A missing key means mock mode is used automatically. Code outside `providers/` must never import `anthropic` or `elevenlabs`.
+3. **Explainable code.**
+   - The owner must be able to explain every file in a Python code review.
+   - Prefer plain functions and small modules over frameworks, metaclasses, decorators-with-magic, or clever generics.
+   - A new dependency needs a one-line justification in the PR or commit.
+4. **Secrets.**
+   - Keys live only in `.env`, which is git-ignored. Commit `.env.example` with empty values.
+   - Never log keys, and never put keys in the frontend.
+5. **No safety-critical announcements.** Emergency, evacuation and security events are out of scope. Do not add event types for them.
+6. **PII.** Passenger names must not appear in logs or the metrics API. Use the event id instead.
+
+## Stack
+
+- **Backend:**
+  - Python 3.12, FastAPI, Pydantic v2, `pydantic-settings`
+  - SQLModel + SQLite
+  - `anthropic` (Claude API) and `elevenlabs` (official SDK, pinned `>=2.77,<3`)
+  - `mutagen` (MP3 duration), `httpx` (TfL), `pyyaml`
+- **Tooling:** `uv` for env and deps, `pytest`, `pytest-asyncio`, `ruff` (lint + format).
+- **Frontend:** React + Vite + TypeScript + Tailwind. No state library: `fetch` + `useState`/`useEffect`, and native `EventSource` for SSE.
+- **Models (via `.env`):**
+  - `SCRIPT_MODEL_DEFAULT=claude-haiku-5-5`
+  - `SCRIPT_MODEL_ESCALATION=claude-sonnet-5-5`, used for fact-lock retries and all staff notes
+  - `ELEVENLABS_MODEL_ID=eleven_v4_turbo`
+
+## Folder layout
+
+```
+relay/
+├── CLAUDE.md  SPEC.md  ARCHITECTURE.md  PLAN.md  README.md
+├── Makefile                       # thin wrappers for the commands below
+├── .env.example                   # committed; .env is not
+├── backend/
+│   ├── pyproject.toml             # deps + ruff + pytest config
+│   ├── relay/
+│   │   ├── main.py                # FastAPI app, lifespan starts scheduler + sources
+│   │   ├── config.py              # Settings (pydantic-settings), mock/live resolution
+│   │   ├── db.py                  # engine, session dependency, create_all
+│   │   ├── models.py              # SQLModel tables: Event, LLMCall, Announcement, AudioClip, PlaybackJob, PlayLog
+│   │   ├── schemas.py             # Pydantic event payloads (discriminated union) + API DTOs
+│   │   ├── sites.py               # load/validate sites/*.yaml
+│   │   ├── events.py              # create / update / resolve; orchestrates script → voice → schedule
+│   │   ├── voice.py               # render with content-hash cache
+│   │   ├── scheduler.py           # 1 s tick loop, zone busy tracking, escalation
+│   │   ├── bus.py                 # in-memory SSE fan-out
+│   │   ├── timeutil.py            # now(), scaled(seconds) — the ONLY place RELAY_TIME_SCALE is read
+│   │   ├── script/
+│   │   │   ├── engine.py          # LLM → fact lock → escalate → template
+│   │   │   ├── factlock.py        # pure checks, no I/O
+│   │   │   ├── templates.py       # deterministic wording per type/urgency/language
+│   │   │   ├── prompt.py          # system + user prompt builders
+│   │   │   ├── normalize.py       # script → spoken_text
+│   │   │   └── lexicon/           # claims.<lang>.yaml, numbers.<lang>.yaml
+│   │   ├── providers/
+│   │   │   ├── llm_base.py        # LLMProvider Protocol, LLMResult
+│   │   │   ├── llm_anthropic.py
+│   │   │   ├── llm_mock.py
+│   │   │   ├── tts_base.py        # TTSProvider Protocol, RenderRequest, TTSResult
+│   │   │   ├── tts_elevenlabs.py
+│   │   │   ├── tts_mock.py
+│   │   │   └── pricing.py         # $ per MTok / per 1K chars
+│   │   ├── sources/
+│   │   │   ├── replay.py          # plays scenarios/*.json on a (scaled) timeline
+│   │   │   └── tfl.py             # Phase 7: TfL line status poller
+│   │   └── api/
+│   │       ├── events.py  playback.py  metrics.py  scenarios.py
+│   ├── sites/                     # tube_station.yaml, airport.yaml, bus_station.yaml, *.pls
+│   ├── scenarios/                 # a_jubilee.json, b_ba117.json, c_route25.json
+│   ├── static/chime.mp3
+│   ├── scripts/sync_pronunciations.py
+│   ├── tests/                     # mirrors relay/; test_factlock.py is the biggest file
+│   └── data/                      # git-ignored: relay.db, audio/
+└── frontend/
+    ├── package.json  vite.config.ts  tailwind config
+    └── src/
+        ├── main.tsx  App.tsx  api.ts  types.ts
+        ├── pages/Console.tsx  Zones.tsx  Metrics.tsx
+        └── components/EventForm.tsx  StaffNote.tsx  AnnouncementCard.tsx  ZonePlayer.tsx
+```
+
+## Commands
+
+Run from the repo root.
+
+```bash
+make setup        # cd backend && uv sync ; cd frontend && npm install
+make dev          # backend :8000 (uvicorn --reload) + frontend :5173 (vite, proxies /api)
+make test         # cd backend && uv run pytest -q
+make lint         # uv run ruff check . && uv run ruff format --check . && (cd frontend && npm run typecheck)
+make fmt          # uv run ruff format . && uv run ruff check --fix .
+make demo-a       # POST /scenarios/a_jubilee/run (same for demo-b, demo-c)
+```
+
+Underlying commands, if not using make:
+- Backend: `cd backend && uv run uvicorn relay.main:app --reload --port 8000`
+- Frontend: `cd frontend && npm run dev`
+- Single test: `cd backend && uv run pytest tests/test_factlock.py -q -k gate`
+
+## Environment (`.env.example`)
+
+```
+ANTHROPIC_API_KEY=
+ELEVENLABS_API_KEY=
+RELAY_LLM_MODE=auto             # auto | mock | live   (auto = live if key present)
+RELAY_TTS_MODE=auto
+SCRIPT_MODEL_DEFAULT=claude-haiku-5-5
+SCRIPT_MODEL_ESCALATION=claude-sonnet-5-5
+ANTHROPIC_SERVER_FALLBACK=false
+LLM_TIMEOUT_S=6
+ELEVENLABS_MODEL_ID=eleven_v4_turbo
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+ELEVENLABS_MAX_CONCURRENCY=2
+RELAY_TIME_SCALE=1              # 60 = one minute passes in one second
+RELAY_MOCK_HALLUCINATE=false    # mock LLM injects one false fact per event (demo)
+RELAY_PII_RETENTION_HOURS=24
+RELAY_DB_URL=sqlite:///data/relay.db
+TFL_APP_KEY=                    # optional; TfL works without it at low rate
+```
+
+Voice ids and pronunciation dictionary locators are set per site in `sites/*.yaml`, not in `.env`.
+
+## Conventions
+
+**Python**
+- Type hints everywhere. `from __future__ import annotations` is not needed on 3.12.
+- Ruff config: line length 100, rules `E,F,I,UP,B,SIM`.
+- Functions over classes. Classes only for Pydantic/SQLModel models and provider implementations.
+- Pure core, thin edges:
+  - `factlock.py`, `templates.py`, `normalize.py`, `prompt.py` and scheduler decision logic do no I/O and take explicit arguments.
+  - Time comes in as a parameter (`now: datetime`), never from `datetime.now()` inside logic.
+- Sync SQLModel sessions inside FastAPI's threadpool are fine. Only `scheduler.py`, `bus.py` and the SSE endpoint are `async`. Blocking provider calls are run with `asyncio.to_thread`.
+- All intervals go through `timeutil.scaled()`. Never `asyncio.sleep(<literal>)` outside `timeutil`.
+- Each event payload field that is a fact is declared in `schemas.py` with `Field(json_schema_extra={"fact": True})`. The fact lock and the prompt read that metadata, so the fact list has a single source.
+- Errors: providers raise `ProviderError`, and the engine catches it and falls back. API handlers return 4xx for validation errors and never 500 for a provider failure.
+- Logging: `logging` stdlib, one logger per module, no PII. Metrics come from DB rows, not from log parsing.
+
+**LLM prompts**
+- Prompts live in `script/prompt.py` as plain f-strings or constants. They are versioned with `PROMPT_VERSION`, which is stored on `LLMCall`.
+- The output is always structured (Pydantic model through `messages.parse`). Never regex-parse free text.
+- Do not send `temperature`/`top_p`/`top_k`, assistant prefill, or forced `tool_choice`. Current models reject them.
+
+**ElevenLabs**
+- Only `providers/tts_elevenlabs.py` imports `elevenlabs`.
+- Always pass `model_id`, `language_code`, `output_format` and `seed` explicitly.
+- Never put SSML or `<break>` in text, because v4 ignores or doesn't support it.
+- Audio tags and IPA are inserted only by code (`normalize.py`), never by the LLM. The fact lock rejects `[ ] < > /` in LLM text.
+
+**Tests**
+- Every fact-lock layer has positive and negative cases in EN, ES and FR. Every bug that slips past the lock becomes a test.
+- Tests always run in mock mode. `conftest.py` forces `RELAY_LLM_MODE=mock`, `RELAY_TTS_MODE=mock`, a temp DB, and `RELAY_TIME_SCALE=1000`.
+- Live smoke tests are marked `@pytest.mark.live` and skipped unless `-m live` is passed and keys exist.
+- Each scenario has an end-to-end test that runs its replay in mock mode and asserts the `PlayLog` sequence (for example, C produces exactly 7 plays).
+
+**Frontend**
+- One `api.ts` with typed fetch helpers. `types.ts` mirrors backend DTOs by hand (small surface, no codegen).
+- Tailwind utility classes only. No component library.
+- The header always shows `LLM: live|mock · TTS: live|mock` from `GET /health`.
+
+**Git**
+- Small commits per phase step. Never commit `.env`, `data/`, `node_modules/` or generated audio.
+
+## Definition of done (every change)
+
+`make lint` and `make test` pass. If behaviour changed, the relevant doc is updated. The mock-mode demo for the affected scenario still runs.

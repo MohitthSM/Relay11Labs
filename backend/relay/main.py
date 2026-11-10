@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlmodel import Session
 
+from relay.api import events as events_api
 from relay.api.workflows import build_router
 from relay.config import Settings, get_settings, resolve_mode
 from relay.db import init_db, make_engine
@@ -29,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Relay", lifespan=lifespan)
     app.state.ctx = ctx
     app.include_router(build_router(ctx, db))
+    app.include_router(events_api.build_router(ctx))
 
     @app.get("/health")
     def health() -> dict:

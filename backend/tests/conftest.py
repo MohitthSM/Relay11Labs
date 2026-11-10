@@ -1,10 +1,12 @@
 import os
 
-# Force mock mode and fast time BEFORE relay is imported anywhere.
+# Keep a real key for `-m live` tests, then force mock mode and fast time BEFORE relay is
+# imported anywhere.
+os.environ["RELAY_LIVE_ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY", "")
 os.environ.update(
     RELAY_LLM_MODE="mock", RELAY_TTS_MODE="mock", RELAY_CHAT_MODE="mock", RELAY_CRM_MODE="mock",
     RELAY_TIME_SCALE="1000", ANTHROPIC_API_KEY="", ELEVENLABS_API_KEY="", SLACK_BOT_TOKEN="",
-    SLACK_SIGNING_SECRET="", SALESFORCE_ACCESS_TOKEN="",
+    SLACK_SIGNING_SECRET="", SALESFORCE_ACCESS_TOKEN="", RELAY_MOCK_HALLUCINATE="false",
 )  # fmt: skip
 
 import pytest  # noqa: E402
@@ -61,3 +63,8 @@ def engine(db_url):
 def session(engine):
     with Session(engine) as s:
         yield s
+
+
+@pytest.fixture
+def settings():
+    return Settings()

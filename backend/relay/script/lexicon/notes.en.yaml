@@ -1,0 +1,47 @@
+# Staff-note lexicon (EN): staff shorthand -> enum value. Used by the staff-note extraction lock:
+# an enum value is only accepted if one of its patterns matches the note text.
+# Kept apart from claims.en.yaml because shorthand ("sig fail", "down") is not announcement
+# wording, and adding it to the claim lexicon would cause false rejections of scripts.
+
+status:
+  good_service: ['\bgood service\b', '\bback to normal\b', '\bresumed\b', '\ball clear\b']
+  minor_delays: ['\bminor\b', '\bslight\b', '\bsmall delays?\b']
+  severe_delays: ['\bsevere\b', '\bmajor delays?\b', '\bdown\b', '\bbig delays?\b', '\bserious\b']
+  part_suspended: ['\bpart(ly|ial)?[- ]?(suspended|suspension|closed)\b']
+  suspended: ['\b(fully )?suspended\b', '\bno service\b', '\bnot running\b', '\bshut\b']
+reason:
+  signal_failure: ['\bsig(nal)?s? ?(fail(ure|ed)?|fault|problems?|issues?)\b']
+  train_fault: ['\btrain (fault|failure|broke(n)? down)\b', '\bfaulty train\b', '\bdefective train\b']
+  customer_incident: ['\b(customer|passenger|cust) incident\b', '\bill (customer|passenger)\b']
+  power_failure: ['\bpower (fail(ure)?|cut|outage|off)\b']
+  staff_shortage: ['\bstaff(ing)? (shortage|short)\b', '\bno (staff|driver)s?\b']
+  engineering_works: ['\bengineering( works)?\b', '\bplanned works\b']
+  roadworks: ['\broad ?works\b']
+  operational_reasons: ['\boperational\b']
+page_type:
+  final_call: ['\bfinal (boarding )?call\b', '\blast call\b', '\bfinal\b']
+
+# Notes that match these are refused before any model sees them.
+# Instructions aimed at the system (prompt injection) and safety-critical content (out of scope).
+injection:
+  - '\b(ignore|disregard|forget|override|bypass)\b.{0,40}\b(instructions?|rules?|prompts?|guidelines?|polic(y|ies)|above|previous)\b'
+  - '\bsystem prompt\b'
+  - '\byou are (now|an?|the)\b'
+  - '\b(new|updated) instructions?\b'
+  - '\bact as\b'
+  - '\bjailbreak'
+  - '\bdeveloper mode\b'
+  - '\b(announce|say|read out|broadcast|play)\b.{0,15}["“”''`]'
+  - '\b(announce|say|read out|broadcast) (the following|this|exactly|verbatim)\b'
+  - '</?\w+>'
+  - '\{\{|\}\}'
+out_of_scope:
+  - '\bevacuat'
+  - '\bfire\b'
+  - '\bbomb\b'
+  - '\bsuspicious (package|item|bag)\b'
+  - '\bsecurity (alert|threat|incident)\b'
+  - '\bemergency\b'
+  - '\bterror'
+  - '\bgun\b'
+  - '\bcode (red|amber)\b'

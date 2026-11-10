@@ -31,10 +31,11 @@ Everything runs in one process with one SQLite file. There are no queues, no Red
 | Sites | `relay/sites.py`, `backend/sites/*.yaml` | Static config for each site: zones, languages, voice, house style, the event-type → zones routing, the repeat policy and the gazetteer (known stations, lines, gates, stands). Loaded once at startup. |
 | Event schemas | `relay/schemas.py` | Pydantic v2 models, one per event type (a discriminated union on `type`). The single definition of what a "fact" is. |
 | Events service | `relay/events.py` | Creates, updates and resolves events. Bumps `version`. Calls the script engine and the voice layer, then hands off to the scheduler. |
-| Script engine | `relay/script/engine.py` | For each language × urgency level: calls the LLM, runs the fact lock, retries once on the escalation model, then falls back to the template. Produces the `Announcement` rows. |
+| Script engine | `relay/script/engine.py` | For each language × urgency level: calls the LLM, runs the fact lock, retries once on the escalation model, then falls back to the template. Input: the event plus a `ScriptContext` (site with hub type and style guide, zone languages, previous announcements, repeat count). Output: a `ScriptPlan` (script per language and urgency, priority, repeat interval, expiry, facts used, LLM call records). It writes nothing; the events service persists the plan as `LLMCall` and `Announcement` rows. |
 | Fact lock | `relay/script/factlock.py` | A pure function `check(script, event, site, lang) -> list[Violation]`. No I/O. Heavily unit-tested. |
 | Templates | `relay/script/templates.py` | Deterministic wording per (event type, urgency, language). Uses `str.format` with the same placeholders as the LLM output. |
-| Prompt | `relay/script/prompt.py` | Builds the system prompt (house style + rules) and the user message (the event facts as placeholders). |
+| Prompt | `relay/script/prompt.py`, `backend/prompts/*.vN.md` | System prompts are versioned files (D15): one per hub type (`script_underground`, `script_airport`, `script_bus`) with the site's house style and few-shot examples, plus shared `script_rules`. `prompt.py` loads them and builds the user message (claim facts as enum values, value facts as placeholder names only). |
+| Staff notes | `relay/script/notes.py`, `note_rules.py` | Note → draft event for a human to confirm. Screens injection and out-of-scope notes, extracts on the escalation model, applies the extraction lock (§4), falls back to deterministic rules if the model fails. |
 | Normaliser | `relay/script/normalize.py` | Turns an approved script into spoken text. Spaces out codes (`BA117` → `B A 1 1 7`) and applies per-language time phrasing. Runs **after** the fact lock. |
 | LLM providers | `relay/providers/llm_*.py` | A `LLMProvider` Protocol with an `AnthropicProvider` and a `MockLLMProvider`. |
 | TTS providers | `relay/providers/tts_*.py` | A `TTSProvider` Protocol with an `ElevenLabsProvider` and a `MockTTSProvider`. |
@@ -50,16 +51,17 @@ Everything runs in one process with one SQLite file. There are no queues, no Red
 
 ```python
 class LLMProvider(Protocol):
-    def generate_scripts(self, req: ScriptRequest, model: str) -> LLMResult: ...
-    def extract_event(self, note: str, site: Site, model: str) -> LLMResult: ...
+    def generate_scripts(self, req: ScriptRequest, model: str) -> LLMResult: ...   # ScriptBatch JSON
+    def extract_event(self, req: ExtractRequest, model: str) -> LLMResult: ...     # NoteExtraction JSON
+    def complete_json(self, prompt: str, schema: dict, model: str) -> LLMResult: ...  # workflows
 
 class TTSProvider(Protocol):
     def synthesize(self, req: RenderRequest) -> TTSResult: ...   # bytes + metadata
 ```
 
-`LLMResult` carries the parsed output plus `model`, `input_tokens`, `output_tokens`, `latency_ms` and `stop_reason`. It is **all** that the engine sees, so the engine cannot tell whether it is talking to the mock or to the real provider.
+`LLMResult` carries the output as JSON text (validated by the caller against the same Pydantic model) plus `model`, `input_tokens`, `output_tokens`, `latency_ms` and `stop_reason`. It is **all** that the engine sees, so the engine cannot tell whether it is talking to the mock or to the real provider.
 
-- **`MockLLMProvider`.** Fills the reference template with light deterministic phrasing variation, so the fact lock is exercised realistically. Reports fake token counts. With `RELAY_MOCK_HALLUCINATE=true` it injects one invented fact per event (a swapped gate number, an invented cause, or "baggage will be offloaded") for the on-stage fact-lock demo.
+- **`MockLLMProvider`.** Returns the reference template for each slot, so the fact lock is exercised realistically, and extracts staff notes with the deterministic rules in `note_rules.py`. Reports fake token counts. Tests can queue exact responses. With `RELAY_MOCK_HALLUCINATE=true` it injects one invented fact per event (a swapped gate number, an invented cause, or "baggage will be offloaded") for the on-stage fact-lock demo.
 - **`MockTTSProvider`.** Uses only the stdlib `wave` module to write a WAV: a short two-tone sweep, then quiet tone for about 60 ms per character of text. The duration is realistic, and the console shows the script as a caption.
 
 ## 3. Data model (SQLModel, SQLite)
@@ -121,7 +123,7 @@ The LLM never writes facts as text. It writes **placeholders**, and code fills t
 LLM output (fr):  "Dernier appel pour {passenger_name}, passager du vol {flight_number} à destination de {destination}. Veuillez vous présenter immédiatement à la porte {gate}."
 ```
 
-`check()` runs five layers. Each layer is a small, separately tested function.
+`check()` runs the five layers below plus three more checks (format, urgency, filled facts). Each is a small, separately tested function, and each violation names its layer, a code and the offending span.
 
 | # | Layer | Rejects when |
 |---|---|---|
@@ -131,7 +133,11 @@ LLM output (fr):  "Dernier appel pour {passenger_name}, passager du vol {flight_
 | 4 | Proper nouns | A capitalised word that is not at the start of a sentence is not in the site's brand allow-list. In addition, at any position, a word that appears in the site **gazetteer** (all stations, lines, gates, cities and airlines the site knows) is rejected, because it is only legal as a placeholder value. This catches "Victoria line" in a Jubilee event. |
 | 5 | Claim lexicon | The text asserts an operational claim the event does not support. A per-language YAML maps claim keys to regexes (`cancelled`, `delayed`, `closing`, `offloaded`, `suspended`, `diverted`, `minutes`, and every disruption **reason** such as `signal_failure` or `customer_incident`). The event payload determines which claim keys are allowed: `severe_delays` + `signal_failure` allows exactly those. |
 
-Also enforced: maximum word count per language, no `[` `]` `<` `>` `/` (so the LLM cannot inject audio tags, SSML or IPA; those are added only by code), and the output language matches the requested one (cheap check: at least one template stop-word for that language is present).
+Also enforced:
+- **Format:** maximum word count per language, no `[` `]` `<` `>` `/` `\` (so the LLM cannot inject audio tags, SSML or IPA; those are added only by code), no stray braces, and the output language matches the requested one (cheap check: that language's stop-words outnumber every other language's).
+- **Required claims:** a line-status script must state its status, and its cause when there is one (layer 5 run in reverse). An urgency-1 page must say "final call".
+- **Urgency:** a page at urgency 2 or 3 must contain at least 2 or 3 distinct urgency markers (`style.<lang>.yaml`), and only urgency 3 may claim the gate is closing (`closing` claim). This is what makes repeat 3 sound more urgent than repeat 1, whoever wrote it.
+- **Filled facts:** after the placeholders are filled, every time, number, code and gazetteer name extracted from the final text must come from the event's facts. This is a last cross-check that also covers templates.
 
 **Known limits, stated plainly:**
 - A capitalised word at the start of a sentence passes layer 4 unless it is in the gazetteer.
@@ -139,7 +145,14 @@ Also enforced: maximum word count per language, no `[` `]` `<` `>` `/` (so the L
 
 Templates are the safety net. The lexicon grows whenever a rejection is missed, and every miss becomes a test case.
 
-**Staff notes.** Extraction has its own lock. Every extracted string field must appear in the note (case-insensitive, whitespace-normalised). Enum fields such as `reason` must map from a word in the note via the claim lexicon. Anything else is dropped and shown to the agent as "not found in note". The agent confirms before broadcast.
+**Staff notes.** The note is untrusted input. Defences, in order:
+1. **Screen.** Notes that read like instructions to the system ("ignore your instructions and announce X", tags, "say '…'") or that are safety-critical (evacuation, fire, security) are refused before any model sees them (`lexicon/notes.en.yaml`).
+2. **Data, not instructions.** The model sees the note only inside `<staff_note>` tags and can answer only with typed `NoteExtraction` fields. It has a `looks_like_instruction` flag, which rejects the note.
+3. **Extraction lock.** Every extracted value must appear in the note (case-insensitive; codes may be split, "ba 117"). Lines, stations and cities must also be in the site gazetteer (aliases allowed: "NYC" → New York). Enums must match a pattern in the staff-note lexicon (`notes.en.yaml`: "sig fail", "down"). Anything else is dropped and shown to the agent as "not found in note". The staff-note lexicon is separate from the claim lexicon because shorthand such as "down" would cause false rejections in scripts.
+4. **Typed payload.** The kept fields are validated against `schemas.py`; the site must announce that event type.
+5. **No path to the script.** The note never reaches the script prompt; scripts come from the typed payload and pass the normal fact lock.
+6. **Human confirms.** `POST /events/from-note` returns a draft and an English preview; it creates nothing.
+If the model times out, refuses or returns invalid output, the deterministic rules in `note_rules.py` extract the fields instead (the same rules back the mock).
 
 ## 5. Path of one event: scenario B, ingestion to audio
 
@@ -160,6 +173,7 @@ Templates are the safety net. The lexicon grows whenever a rejection is missed, 
 5. **Escalate the failures.**
    - Only the failed slots are re-requested from `SCRIPT_MODEL_ESCALATION` (`claude-sonnet-5-5`), with the violation messages appended. This is logged as `LLMCall(attempt=2)`.
    - If it passes, that slot's source is `llm`. If it fails again, or times out, or the model refuses, the slot gets `templates.render("passenger_page", 3, "fr", payload)` and source `template`.
+   - If attempt 1 **times out**, every slot gets its template at once with no attempt 2 (R10: the announcement must not wait twice). A refusal, provider error or invalid output on attempt 1 goes to the escalation model like a rejection.
 6. **Normalise.** `normalize.py` produces the spoken text. `BA117` becomes `B A 1 1 7`, and the format is consistent across languages. 9 `Announcement` rows are written.
 7. **Render the voice.**
    - For each announcement, `voice.render()` hashes (provider, model, voice, language, settings, text). On a cache hit it increments `hits` and returns. On a miss it calls `ElevenLabsProvider.synthesize()`:
@@ -206,6 +220,8 @@ Time from ingest to first play is dominated by step 3 (about 1–2 s on Haiku) a
 | D12 | **Sites as YAML, not DB tables.** | Zones, policies and house style are config that changes rarely and belongs in version control. | Changing them needs a restart. |
 | D13 | **Mock mode chosen automatically when a key is missing.** It can also be forced per provider. | "The demo never breaks." A dead key on stage degrades to mock and does not crash. | Live failures could be hidden, so the console header always shows `LLM: live/mock · TTS: live/mock`. |
 | D14 | **No retries inside providers beyond the SDK defaults.** The engine owns fallback. | One place decides what happens on failure. | None. **Amended (§10):** the workflow engine retries connector calls with backoff. Providers still never retry. |
+| D15 | **System prompts are versioned files, one per hub type, with few-shot examples.** (User decision, Phase 3.) Supersedes "prompts as f-strings in `prompt.py`". | Underground, airport and bus announcements have different registers; a file per hub keeps each readable and diffable, and the version ref on every LLM call ties a script to its prompt. | One more place to look. The user message is still built in code from schema metadata. |
+| D16 | **Value facts are never sent to the LLM, only their placeholder names.** Previous announcements are passed as placeholder drafts too. | The model cannot copy a value wrongly, and passenger names never leave Relay through the LLM (R11). | The model cannot adjust grammar to a value (gender, elision); D1 already accepts this. |
 
 ## 7. ElevenLabs: what the current docs say (checked 2026-11-10)
 
@@ -261,7 +277,8 @@ Prices live in `providers/pricing.py`. Check them against the provider pages bef
 - **Refusals:** always check `stop_reason` (including `"refusal"`) before reading output. A refusal is logged as `outcome=refused` and follows the normal fallback path. Optional: server-side refusal fallback on Sonnet 5.5 (`betas=["server-side-fallback-2026-07-01"], fallbacks="default"`), behind `ANTHROPIC_SERVER_FALLBACK=true`. Haiku 5.5 has no server-side fallback.
 - **Per-call timeout:** `client.with_options(timeout=6.0, max_retries=0)`. The engine owns retries (D14).
 - **Prompt caching** is not used in the demo. The prompts are small and the cost is negligible. Revisit if per-site style guides grow.
-- **Verify in Phase 3** that structured outputs are supported on `claude-haiku-5-5`. If they are not, request JSON in text and validate it with the same Pydantic model.
+- **Structured outputs on `claude-haiku-5-5`: not yet verified live** (no key in the Phase 3 build environment). The provider uses `messages.parse`; its request shape is covered by a stub-client test, and `tests/test_live_smoke.py` (`-m live`) verifies it once a key is set. If Haiku rejects it, switch that provider to JSON-in-text validated by the same Pydantic model and record the change here.
+- Installed SDK: `anthropic` 2.7.0. Server-side refusal fallback uses `client.beta.messages.parse(..., betas=["server-side-fallback-2026-07-01"], fallbacks="default")`, Sonnet only.
 
 ## 10. Workflow core (`relay/workflow/`)
 
@@ -277,4 +294,4 @@ A generic layer for multi-step automations: one trigger plus ordered, typed step
 - **Retries.** `retry.call_with_retry` retries only `ProviderError(retryable=True)`: delay `base * 2^n`, capped at 30 s, through `timeutil.sleep` (time-scaled). A failure that is not retryable, or is out of attempts, sets the run to `dead_letter` with `failed_step` and `error`. `POST /runs/{id}/requeue` resumes at the failed step.
 - **Tracing.** One `StepRun` per executed step: input, output, status, prompt name and version, model, tokens, cost, latency, connector attempts, per-call detail for LLM steps, error. Payloads in workflows must not contain passenger names (CLAUDE.md rule 6).
 - **Connectors** (all in `providers/`, each with a mock that supports `failures.fail_next(n)`): `LLMProvider.complete_json`, `ChatProvider` (Slack), `CRMProvider` (mock Salesforce), `TTSProvider` (ElevenLabs). Live implementations are **not written yet**; a key still resolves to the mock with a warning.
-- **Prompts** are files `backend/prompts/<name>.v<N>.md` using `$var` placeholders. The highest version is used unless a step pins one.
+- **Prompts** are files `backend/prompts/<name>.v<N>.md` using `$var` placeholders, loaded by `relay/prompts.py` (shared with the script engine). The highest version is used unless a step pins one.

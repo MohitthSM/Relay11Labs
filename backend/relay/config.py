@@ -24,6 +24,9 @@ class Settings(BaseSettings):
 
     script_model_default: str = "claude-haiku-5-5"
     script_model_escalation: str = "claude-sonnet-5-5"
+    anthropic_server_fallback: bool = False
+    llm_timeout_s: float = 6.0
+    relay_mock_hallucinate: bool = False  # mock LLM injects one false fact per event (demo)
     relay_time_scale: float = 1.0  # read ONLY by timeutil.py
     relay_db_url: str = "sqlite:///data/relay.db"
 

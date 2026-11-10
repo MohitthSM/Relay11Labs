@@ -1,0 +1,27 @@
+# Claim lexicon (ES). Same keys as claims.en.yaml. Case-insensitive.
+
+good_service: ['\bservicio normal\b', '\bcon normalidad\b', '\brestablecid[oa]\b', '\bse ha restablecido\b']
+minor_delays: ['\bretrasos? (leves?|menores)\b', '\bligeros retrasos\b']
+severe_delays: ['\bretrasos? (graves|importantes|severos)\b', '\bgraves retrasos\b', '\bimportantes retrasos\b']
+delayed: ['\bretras(o|os|ad[oa]s?)\b', '\bdemoras?\b']
+part_suspended: ['\bsuspensi[oó]n parcial\b', '\bparcialmente suspendid[oa]\b']
+suspended: ['\bsuspendid[oa]\b', '\bsuspensi[oó]n\b', '\bsin servicio\b', '\bcerrad[oa]\b']
+
+signal_failure: ['\b(fallo|aver[ií]a|incidencia) (de|en) (la )?se[ñn]al(izaci[oó]n|es)?\b']
+train_fault: ['\baver[ií]a (de|en) (un )?tren\b', '\btren averiado\b']
+customer_incident: ['\bincidente con un (cliente|pasajero|viajero)\b', '\bincidencia con un (cliente|pasajero|viajero)\b']
+power_failure: ['\b(fallo|corte) (de|en|del) (suministro )?(el[eé]ctrico|corriente|luz)\b']
+staff_shortage: ['\bfalta de personal\b']
+engineering_works: ['\bobras de (ingenier[ií]a|mantenimiento)\b', '\btrabajos de mantenimiento\b']
+roadworks: ['\bobras en la (calzada|carretera|v[ií]a p[uú]blica)\b']
+operational_reasons: ['\b(motivos|razones) operativ[oa]s\b']
+
+final_call: ['\b[uú]ltima llamada\b']
+closing: ['\ba punto de cerrar\b', '\bva a cerrar\b', '\bcierr(a|e|an)\b', '\bcerrando\b', '\b[uú]ltimo aviso\b']
+
+cancelled: ['\bcancelad[oa]s?\b', '\bcancelaci[oó]n\b']
+offloaded: ['\bequipaje (ser[aá]|va a ser) (retirado|descargado|desembarcado)\b', '\bdescarga(r|remos|r[aá]n) su equipaje\b']
+diverted: ['\bdesviad[oa]s?\b', '\bdesv[ií]o\b']
+crowding: ['\baglomeraci[oó]n\b', '\bmuy concurrid[oa]\b']
+
+minutes: ['\bminutos?\b', '\bhoras?\b']

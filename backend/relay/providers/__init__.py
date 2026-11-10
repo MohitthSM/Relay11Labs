@@ -1,7 +1,9 @@
 """Provider factory. Only this package may import vendor SDKs (anthropic, elevenlabs, slack).
 
-Live implementations are not written yet: a key plus mode=live still resolves to the mock and
-logs a warning, so the demo never breaks (D13). `mode` on each provider says what you got.
+The LLM is live (Claude) when ANTHROPIC_API_KEY is set and RELAY_LLM_MODE is not "mock".
+TTS, chat and CRM live implementations are not written yet: a key plus mode=live still resolves
+to the mock and logs a warning, so the demo never breaks (D13). `mode` on each provider says
+what you got.
 """
 
 import logging
@@ -33,13 +35,24 @@ def _warn_if_live(name: str, mode: str, key: str) -> None:
         log.warning("%s: live provider not implemented yet, using mock", name)
 
 
+def build_llm(s: Settings) -> LLMProvider:
+    if resolve_mode(s.relay_llm_mode, s.anthropic_api_key) == "live":
+        from relay.providers.llm_anthropic import AnthropicLLMProvider  # imports the SDK
+
+        return AnthropicLLMProvider(
+            s.anthropic_api_key,
+            timeout_s=s.llm_timeout_s,
+            server_fallback=s.anthropic_server_fallback,
+        )
+    return MockLLMProvider(hallucinate=s.relay_mock_hallucinate)
+
+
 def build_connectors(s: Settings) -> Connectors:
-    _warn_if_live("llm", s.relay_llm_mode, s.anthropic_api_key)
     _warn_if_live("tts", s.relay_tts_mode, s.elevenlabs_api_key)
     _warn_if_live("chat", s.relay_chat_mode, s.slack_bot_token)
     _warn_if_live("crm", s.relay_crm_mode, s.salesforce_access_token)
     return Connectors(
-        llm=MockLLMProvider(),
+        llm=build_llm(s),
         chat=MockChatProvider(),
         crm=MockSalesforceProvider(),
         tts=MockTTSProvider(),

@@ -1,9 +1,14 @@
-"""Versioned prompt files: prompts/<name>.v<N>.md, rendered with string.Template ($var)."""
+"""Versioned prompt files: prompts/<name>.v<N>.md, rendered with string.Template ($var).
+
+Shared by the script engine (system prompts per hub type) and the workflow engine.
+"""
 
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -12,14 +17,25 @@ class Prompt:
     version: int
     template: str
 
+    @property
+    def ref(self) -> str:
+        """'name.vN': stored on every LLM call so a script can be traced to its prompt."""
+        return f"{self.name}.v{self.version}"
+
     def render(self, **values: object) -> str:
         return Template(self.template).substitute(values)
+
+
+def resolve_dir(prompts_dir: str | Path) -> Path:
+    """A relative prompts dir is relative to backend/, not to the current directory."""
+    path = Path(prompts_dir)
+    return path if path.is_absolute() else BACKEND_DIR / path
 
 
 def load_prompt(prompts_dir: str | Path, name: str, version: int | None = None) -> Prompt:
     """Load a specific version, or the highest one if version is None."""
     found = {}
-    for path in Path(prompts_dir).glob(f"{name}.v*.md"):
+    for path in resolve_dir(prompts_dir).glob(f"{name}.v*.md"):
         m = re.fullmatch(rf"{re.escape(name)}\.v(\d+)\.md", path.name)
         if m:
             found[int(m.group(1))] = path

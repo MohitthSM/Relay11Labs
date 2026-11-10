@@ -1,0 +1,6 @@
+# Cardinal number words (FR). "un" and "une" are left out on purpose: they are also the
+# indefinite article ("un train"), so they cannot be told apart from a number by word alone.
+words: [deux, trois, quatre, cinq, six, sept, huit, neuf, dix, onze, douze, treize, quatorze,
+        quinze, seize, vingt, trente, quarante, cinquante, soixante, cent, mille, demi, demie,
+        quart, douzaine, "deuxième", "troisième", "quatrième", "cinquième"]
+allow: []

@@ -1,0 +1,20 @@
+id: bus_station
+name: Victoria Coach and Bus Station
+hub_type: bus
+voice_id: ""            # chosen by listening in Phase 4
+style_guide: |
+  Short and practical. Lead with the route number. Say the new stand, then the old one,
+  then tell people where to go. Repeat the new stand at the end.
+allowed_terms: [Stand, Route, Bus]
+zones:
+  - {id: concourse, name: Bus station concourse, languages: [en]}
+  - {id: stand-b, name: Stand B, languages: [en]}
+  - {id: stand-f, name: Stand F, languages: [en]}
+policies:
+  stand_change:
+    zones: [concourse, stand-b, stand-f]
+    interval_s: 180
+    duration_s: 1200
+    priority: 60
+gazetteer:
+  stations: [Victoria, Oxford Circus, Holborn, Bank, Stratford, Whitechapel, Aldwych, Marble Arch]

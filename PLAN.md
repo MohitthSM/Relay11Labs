@@ -27,6 +27,8 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 3: Script engine
 
+> **Status:** built in mock mode. Done: `schemas.py` and `sites.py` (pulled forward from Phase 2), three site YAMLs, providers (`llm_mock`, `llm_anthropic`), templates, the fact lock (5 layers + format, required claims, urgency, filled-facts), lexicons in EN/ES/FR, prompt files per hub type (D15), `engine.py` returning a `ScriptPlan`, staff notes with `POST /events/from-note`, `normalize.py`, scenario JSONs. **Still open:** writing `LLMCall`/`Announcement` rows (needs `models.py` and `events.py` from Phase 2), the console announcement card (no frontend yet), and the `-m live` smoke run (no API key in the build environment; see ARCHITECTURE §9).
+
 **Goal:** events become fact-locked scripts in EN/ES/FR at each urgency level, with model routing logged.
 
 - `providers/llm_base.py`, `llm_mock.py` (with `RELAY_MOCK_HALLUCINATE`), `llm_anthropic.py` (`messages.parse`, effort `low`, 6 s timeout, `stop_reason` handling), `pricing.py`.

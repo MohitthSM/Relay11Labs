@@ -1,0 +1,11 @@
+{
+  "name": "b_ba117",
+  "description": "Airport: final-call page in EN/ES/FR, escalating over 3 repeats (SPEC 5.B)",
+  "site_id": "airport",
+  "events": [
+    {"at_s": 0, "action": "create", "event_key": "page-BA117-john-smith",
+     "payload": {"type": "passenger_page", "passenger_name": "John Smith",
+                 "flight_number": "BA117", "destination": "New York", "gate": "23",
+                 "page_type": "final_call"}}
+  ]
+}

@@ -1,0 +1,3 @@
+urgency: ["immédiatement", maintenant, tout de suite, tout dernier appel, va bientôt fermer,
+          sans attendre, "prêt à partir", "sans délai"]
+stopwords: [le, les, veuillez, vous, sur, est, nous, du, au, ce, il, votre, vers, et]

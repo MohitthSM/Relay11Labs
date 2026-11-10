@@ -3,12 +3,12 @@
 import json
 import logging
 import time
-from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 from sqlmodel import Session, select
 
 from relay import timeutil
+from relay.prompts import load_prompt
 from relay.providers.pricing import llm_cost
 from relay.workflow.context import Context
 from relay.workflow.models import (
@@ -21,13 +21,10 @@ from relay.workflow.models import (
     StepRun,
     WorkflowRun,
 )
-from relay.workflow.prompts import load_prompt
 from relay.workflow.retry import call_with_retry
 from relay.workflow.steps import ACTION, APPROVAL, DETERMINISTIC, LLM, ApprovalDecision, Step
 
 log = logging.getLogger(__name__)
-# Prompt file location is resolved against the backend dir when relative.
-BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class StepFailure(Exception):
@@ -137,10 +134,7 @@ def _run_deterministic(step, inp, run, rec, ctx, session) -> BaseModel:
 
 def _run_llm(step, inp, run, rec, ctx, session) -> BaseModel:
     s = ctx.settings
-    prompts_dir = Path(s.prompts_dir)
-    if not prompts_dir.is_absolute():
-        prompts_dir = BACKEND_DIR / prompts_dir
-    prompt = load_prompt(prompts_dir, step.prompt, step.prompt_version)
+    prompt = load_prompt(s.prompts_dir, step.prompt, step.prompt_version)
     rec.prompt_name, rec.prompt_version = prompt.name, prompt.version
     rec.model = step.model or s.script_model_default
     schema = step.output_model.model_json_schema()

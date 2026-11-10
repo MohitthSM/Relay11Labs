@@ -64,13 +64,18 @@ relay/
 │   │   ├── scheduler.py           # 1 s tick loop, zone busy tracking, escalation
 │   │   ├── bus.py                 # in-memory SSE fan-out
 │   │   ├── timeutil.py            # now(), scaled(seconds) — the ONLY place RELAY_TIME_SCALE is read
+│   │   ├── prompts.py             # load versioned prompt files (backend/prompts/)
 │   │   ├── script/
-│   │   │   ├── engine.py          # LLM → fact lock → escalate → template
-│   │   │   ├── factlock.py        # pure checks, no I/O
+│   │   │   ├── engine.py          # LLM → fact lock → escalate → template; returns ScriptPlan
+│   │   │   ├── factlock.py        # pure checks, no I/O beyond cached lexicons
 │   │   │   ├── templates.py       # deterministic wording per type/urgency/language
-│   │   │   ├── prompt.py          # system + user prompt builders
+│   │   │   ├── prompt.py          # loads system prompt per hub type, builds the user message
+│   │   │   ├── calls.py           # one LLM attempt → LLMCallRecord (tokens, cost, outcome)
+│   │   │   ├── notes.py           # staff note → draft event (screen, extract, extraction lock)
+│   │   │   ├── note_rules.py      # deterministic note parser (mock LLM + fallback)
 │   │   │   ├── normalize.py       # script → spoken_text
-│   │   │   └── lexicon/           # claims.<lang>.yaml, numbers.<lang>.yaml
+│   │   │   ├── lexicons.py        # loads lexicon/*.yaml
+│   │   │   └── lexicon/           # claims/numbers/style.<lang>.yaml, notes.en.yaml
 │   │   ├── providers/
 │   │   │   ├── llm_base.py        # LLMProvider Protocol, LLMResult
 │   │   │   ├── llm_anthropic.py
@@ -84,6 +89,7 @@ relay/
 │   │   │   └── tfl.py             # Phase 7: TfL line status poller
 │   │   └── api/
 │   │       ├── events.py  playback.py  metrics.py  scenarios.py
+│   ├── prompts/                   # <name>.v<N>.md: script_<hub>, script_rules, note_extract
 │   ├── sites/                     # tube_station.yaml, airport.yaml, bus_station.yaml, *.pls
 │   ├── scenarios/                 # a_jubilee.json, b_ba117.json, c_route25.json
 │   ├── static/chime.mp3
@@ -146,7 +152,7 @@ Voice ids and pronunciation dictionary locators are set per site in `sites/*.yam
 - Ruff config: line length 100, rules `E,F,I,UP,B,SIM`.
 - Functions over classes. Classes only for Pydantic/SQLModel models and provider implementations.
 - Pure core, thin edges:
-  - `factlock.py`, `templates.py`, `normalize.py`, `prompt.py` and scheduler decision logic do no I/O and take explicit arguments.
+  - `factlock.py`, `templates.py`, `normalize.py` and scheduler decision logic do no I/O and take explicit arguments (lexicon and prompt files are read once and cached).
   - Time comes in as a parameter (`now: datetime`), never from `datetime.now()` inside logic.
 - Sync SQLModel sessions inside FastAPI's threadpool are fine. Only `scheduler.py`, `bus.py` and the SSE endpoint are `async`. Blocking provider calls are run with `asyncio.to_thread`.
 - All intervals go through `timeutil.scaled()`. Never `asyncio.sleep(<literal>)` outside `timeutil`.
@@ -155,7 +161,8 @@ Voice ids and pronunciation dictionary locators are set per site in `sites/*.yam
 - Logging: `logging` stdlib, one logger per module, no PII. Metrics come from DB rows, not from log parsing.
 
 **LLM prompts**
-- Prompts live in `script/prompt.py` as plain f-strings or constants. They are versioned with `PROMPT_VERSION`, which is stored on `LLMCall`.
+- System prompts live in versioned files `backend/prompts/<name>.v<N>.md` (`string.Template`, `$var`): one per hub type (`script_underground`, `script_airport`, `script_bus`) with house style and few-shot examples, the shared `script_rules`, and `note_extract`. Never edit a released version in place: add `v<N+1>`. `script/prompt.py` loads the highest version and builds the user message in code. The version ref (`script_airport.v1+script_rules.v1`) is stored on every LLM call record.
+- The user message names value facts only as `{placeholders}`, never their values (so passenger names are not sent to the LLM). Staff notes go in `<staff_note>` tags as data and never reach the script prompt.
 - The output is always structured (Pydantic model through `messages.parse`). Never regex-parse free text.
 - Do not send `temperature`/`top_p`/`top_k`, assistant prefill, or forced `tool_choice`. Current models reject them.
 

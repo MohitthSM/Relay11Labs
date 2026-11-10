@@ -1,0 +1,15 @@
+{
+  "name": "a_jubilee",
+  "description": "Tube: Jubilee line severe delays, then minor delays, then good service (SPEC 5.A)",
+  "site_id": "tube_station",
+  "events": [
+    {"at_s": 0, "action": "create", "event_key": "jubilee-status",
+     "payload": {"type": "line_status", "line": "Jubilee", "status": "severe_delays",
+                 "reason": "signal_failure", "location": "Canary Wharf"}},
+    {"at_s": 360, "action": "update", "event_key": "jubilee-status",
+     "payload": {"type": "line_status", "line": "Jubilee", "status": "minor_delays",
+                 "reason": "signal_failure", "location": "Canary Wharf"}},
+    {"at_s": 720, "action": "resolve", "event_key": "jubilee-status",
+     "payload": {"type": "line_status", "line": "Jubilee", "status": "good_service"}}
+  ]
+}

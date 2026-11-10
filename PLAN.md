@@ -6,6 +6,8 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 2: Scaffold and events
 
+> **Status:** the workflow framework core (ARCHITECTURE §10) was built first, with the scaffold pieces it needs: `pyproject.toml`, `Makefile`, `.env.example`, `config.py`, `db.py`, `timeutil.py`, `providers/`, `main.py` with `/health`. **Still open from this phase:** `models.py` Relay tables, `schemas.py`, `sites.py`, `events.py`, `api/events.py`, the frontend scaffold, and their tests.
+
 **Goal:** a running FastAPI app that stores versioned, validated events.
 
 - **Backend**

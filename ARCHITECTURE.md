@@ -205,7 +205,7 @@ Time from ingest to first play is dominated by step 3 (about 1–2 s on Haiku) a
 | D11 | **`RELAY_TIME_SCALE`** divides every interval. | A 20-minute scenario C runs in 20 s on stage, and tests run instantly. | Every interval must go through one helper (`scaled(seconds)`), which CLAUDE.md enforces. |
 | D12 | **Sites as YAML, not DB tables.** | Zones, policies and house style are config that changes rarely and belongs in version control. | Changing them needs a restart. |
 | D13 | **Mock mode chosen automatically when a key is missing.** It can also be forced per provider. | "The demo never breaks." A dead key on stage degrades to mock and does not crash. | Live failures could be hidden, so the console header always shows `LLM: live/mock · TTS: live/mock`. |
-| D14 | **No retries inside providers beyond the SDK defaults.** The engine owns fallback. | One place decides what happens on failure. | None. |
+| D14 | **No retries inside providers beyond the SDK defaults.** The engine owns fallback. | One place decides what happens on failure. | None. **Amended (§10):** the workflow engine retries connector calls with backoff. Providers still never retry. |
 
 ## 7. ElevenLabs: what the current docs say (checked 2026-11-10)
 
@@ -262,3 +262,19 @@ Prices live in `providers/pricing.py`. Check them against the provider pages bef
 - **Per-call timeout:** `client.with_options(timeout=6.0, max_retries=0)`. The engine owns retries (D14).
 - **Prompt caching** is not used in the demo. The prompts are small and the cost is negligible. Revisit if per-site style guides grow.
 - **Verify in Phase 3** that structured outputs are supported on `claude-haiku-5-5`. If they are not, request JSON in text and validate it with the same Pydantic model.
+
+## 10. Workflow core (`relay/workflow/`)
+
+A generic layer for multi-step automations: one trigger plus ordered, typed steps. It sits beside the announcement pipeline and reuses the same provider seams. Added in the "framework core" change; the announcement pipeline does not depend on it yet.
+
+- **Definition.** `Workflow(name, trigger, steps)`. A trigger is `webhook`, `schedule` or `slack_command`, with a Pydantic payload model. A step has a Pydantic input and output model and one of four kinds:
+  - `deterministic`: a pure function.
+  - `llm`: renders a prompt file, asks for JSON, validates it against the output model, and retries **once** with the validation error appended. A second failure dead-letters the run.
+  - `approval`: pauses the run (`paused`) until `POST /runs/{id}/approval`. The first decision wins and repeats are no-ops. A rejection ends the run as `rejected`.
+  - `action`: a side effect through a connector.
+- **State.** `WorkflowRun` holds status, trigger payload, step outputs and `current_step` in SQLite, saved after every step. `recover()` at startup continues `running` runs. `paused` runs wait for their approval, across restarts.
+- **Idempotency.** Triggers: unique `(workflow, idempotency_key)`, and a repeat returns the existing run (webhook header `Idempotency-Key`, Slack `trigger_id`, schedule slot number). Actions: key `"{run_id}:{step}"` is stored in `ActionRecord` and also passed to the connector, so a crash between the side effect and the commit still cannot double-post.
+- **Retries.** `retry.call_with_retry` retries only `ProviderError(retryable=True)`: delay `base * 2^n`, capped at 30 s, through `timeutil.sleep` (time-scaled). A failure that is not retryable, or is out of attempts, sets the run to `dead_letter` with `failed_step` and `error`. `POST /runs/{id}/requeue` resumes at the failed step.
+- **Tracing.** One `StepRun` per executed step: input, output, status, prompt name and version, model, tokens, cost, latency, connector attempts, per-call detail for LLM steps, error. Payloads in workflows must not contain passenger names (CLAUDE.md rule 6).
+- **Connectors** (all in `providers/`, each with a mock that supports `failures.fail_next(n)`): `LLMProvider.complete_json`, `ChatProvider` (Slack), `CRMProvider` (mock Salesforce), `TTSProvider` (ElevenLabs). Live implementations are **not written yet**; a key still resolves to the mock with a warning.
+- **Prompts** are files `backend/prompts/<name>.v<N>.md` using `$var` placeholders. The highest version is used unless a step pins one.

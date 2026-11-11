@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     relay_time_scale: float = 1.0  # read ONLY by timeutil.py
     relay_db_url: str = "sqlite:///data/relay.db"
 
+    # Real data (Phase 7). Demo mode plays the scripted scenarios; live mode polls TfL.
+    relay_data_mode: Literal["demo", "live"] = "demo"  # the start-up mode; the UI can switch it
+    relay_tfl_lines: str = "jubilee"  # comma-separated TfL line ids, e.g. "jubilee,victoria"
+    relay_tfl_poll_s: float = 60.0  # real seconds, never time-scaled
+    relay_tfl_site: str = "tube_station"
+    tfl_app_key: str = ""  # optional: TfL answers without a key at a low rate limit
+
     # Voice layer. Model routing table (voice.py ROUTES): urgent/live clips use the lowest-latency
     # model, scheduled and escalation clips use the highest-quality one.
     elevenlabs_model_live: str = "eleven_v4_turbo"

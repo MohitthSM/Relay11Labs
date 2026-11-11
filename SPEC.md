@@ -95,7 +95,7 @@ Each scenario ships as a replay file in `backend/scenarios/` that posts timed ev
 - **Zones:** Jubilee eastbound platform, Jubilee westbound platform, ticket hall.
 - **Repeat:** every 5 min while active.
 - **Language:** English only.
-- **Phase 7:** the same flow is driven by the live TfL Unified API. The replay file stays as the stage version, because the real line will usually show good service.
+- **Phase 7:** the same flow is driven by the live TfL Unified API. The replay file stays as the stage version, because the real line will usually show good service. The console has a Demo (scripted) / Live (TfL) switch; if the feed fails, the last state is kept, a warning is shown and nothing is announced from stale data.
 
 **What it proves:** updates replace old content automatically, and the cause is stated correctly and never made up.
 

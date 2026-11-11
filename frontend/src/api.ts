@@ -9,7 +9,9 @@ import type {
   RunStatus,
   ScenarioList,
   Site,
+  SourceStatus,
   StateMessage,
+  DataMode,
   Zone,
 } from "./types";
 
@@ -78,6 +80,9 @@ export const updateEvent = (eventKey: string, payload: Record<string, unknown>) 
   request<RelayEvent>(`/events/${encodeURIComponent(eventKey)}`, send("PUT", { payload }));
 export const draftFromNote = (siteId: string, note: string) =>
   request<NoteDraftOut>("/events/from-note", send("POST", { site_id: siteId, note }));
+
+export const getSource = () => request<SourceStatus>("/source");
+export const setSource = (mode: DataMode) => request<SourceStatus>("/source", send("PUT", { mode }));
 
 export const listScenarios = () => request<ScenarioList>("/scenarios");
 export const runScenario = (name: string, speed: number, autoApprove: boolean) =>

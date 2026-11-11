@@ -4,10 +4,12 @@ import {
   getHealth,
   getRun,
   getSites,
+  getSource,
   listScenarios,
   resolveEvent,
   runScenario,
   setHallucinate,
+  setSource,
   setSpeed,
 } from "./api";
 import Compose from "./components/Compose";
@@ -18,7 +20,7 @@ import { useLive } from "./live";
 import Console from "./pages/Console";
 import Metrics from "./pages/Metrics";
 import Zones from "./pages/Zones";
-import type { Health, RelayEvent, RunStatus, ScenarioInfo, Site } from "./types";
+import type { DataMode, Health, RelayEvent, RunStatus, ScenarioInfo, Site, SourceStatus } from "./types";
 import { useZoneAudio } from "./zoneAudio";
 
 type Page = "console" | "zones" | "metrics";
@@ -48,6 +50,8 @@ export default function App() {
   const [compose, setCompose] = useState<{ edit: RelayEvent | null } | null>(null);
   const [notice, setNotice] = useState<{ text: string; bad: boolean } | null>(null);
 
+  const [source, setSourceState] = useState<SourceStatus | null>(null);
+
   const activity = useZoneAudio(live, audioOn, speed);
 
   const tell = useCallback((text: string, bad = false) => setNotice({ text, bad }), []);
@@ -63,6 +67,16 @@ export default function App() {
       })
       .catch(failed);
   }, [failed]);
+
+  // the feed status arrives on the same WebSocket (D8); a reconnect re-fetches what was missed
+  useEffect(() => {
+    const load = () => getSource().then(setSourceState).catch(() => {});
+    load();
+    const unsubscribe = live.subscribe((m) => {
+      if (m.type === "source") setSourceState((prev) => (prev ? { ...prev, ...m } : prev));
+    });
+    return unsubscribe;
+  }, [live, live.status]);
 
   useEffect(() => {
     if (!notice) return;
@@ -83,6 +97,10 @@ export default function App() {
     }, 400);
     return () => window.clearInterval(t);
   }, [running.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const liveMode = source?.mode === "live";
+  const changeSource = (mode: DataMode) =>
+    setSource(mode).then(setSourceState).catch(failed);
 
   const start = (name: string) =>
     runScenario(name, speed, autoApprove)
@@ -184,6 +202,32 @@ export default function App() {
         </header>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-ink-700 py-2" data-testid="toolbar">
+          <div className="flex" role="group" aria-label="Data source" data-testid="source">
+            {(["demo", "live"] as DataMode[]).map((m) => (
+              <button
+                key={m}
+                data-testid={`source-${m}`}
+                aria-pressed={source?.mode === m}
+                disabled={!source}
+                onClick={() => source?.mode !== m && changeSource(m)}
+                title={m === "demo" ? "Scripted scenarios" : "Real TfL line status, polled every minute"}
+                className={`border px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wider first:rounded-l-sm last:rounded-r-sm ${
+                  source?.mode === m
+                    ? "border-phosphor bg-phosphor/15 text-phosphor"
+                    : "border-ink-500 bg-ink-800 text-dim hover:text-slate-200"
+                }`}
+              >
+                {m === "demo" ? "Demo (scripted)" : "Live (TfL)"}
+              </button>
+            ))}
+          </div>
+          {liveMode && (
+            <span className="font-mono text-[10px] uppercase tracking-wider text-dim" data-testid="feed-status" data-status={source?.status}>
+              feed: {source?.status}
+              {source && source.lines.length > 0 && ` · ${source.lines.map((l) => `${l.name} ${l.status ?? "n/a"}`).join(", ")}`}
+              {source && !source.app_key && " · no app key"}
+            </span>
+          )}
           <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-dim">Run scenario</span>
           <div className="flex gap-1.5">
             {scenarios.map((s) => {
@@ -194,7 +238,7 @@ export default function App() {
                   key={s.name}
                   data-testid={`run-${letter}`}
                   title={s.description}
-                  disabled={r?.state === "running"}
+                  disabled={r?.state === "running" || liveMode}
                   className={BTN}
                   onClick={() => start(s.name)}
                 >
@@ -241,6 +285,17 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {liveMode && source?.warning && (
+        <div role="alert" data-testid="feed-warning" className="mt-3 rounded-sm border border-alert/60 bg-alert/10 px-3 py-2 font-mono text-xs text-alert">
+          ⚠ {source.warning}
+        </div>
+      )}
+      {source?.mode === "live" && Object.keys(source.line_errors).length > 0 && (
+        <div className="mt-3 rounded-sm border border-amber-400/50 bg-amber-400/10 px-3 py-2 font-mono text-xs text-amber-300" data-testid="feed-line-errors">
+          Not applied: {Object.entries(source.line_errors).map(([k, v]) => `${k} (${v})`).join("; ")}
+        </div>
+      )}
 
       <div className="mt-4">
         {page === "console" && (

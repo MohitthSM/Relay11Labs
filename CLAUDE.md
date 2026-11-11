@@ -91,9 +91,10 @@ relay/
 │   │   │   └── pricing.py         # $ per MTok / per 1K chars
 │   │   ├── sources/
 │   │   │   ├── replay.py          # plays scenarios/*.json on a (scaled) timeline
-│   │   │   └── tfl.py             # Phase 7: TfL line status poller
+│   │   │   ├── tfl.py             # Phase 7: TfL line status poller (live mode only, D23)
+│   │   │   └── flights.py         # FlightFeed Protocol, mock feed, stub for a real provider
 │   │   └── api/
-│   │       ├── events.py  ws.py  playback.py  scenarios.py  metrics.py  sites.py
+│   │       ├── events.py  ws.py  playback.py  scenarios.py  metrics.py  sites.py  source.py
 │   ├── prompts/                   # <name>.v<N>.md: script_<hub>, script_rules, note_extract
 │   ├── sites/                     # tube_station.yaml, airport.yaml, bus_station.yaml, *.pls, pronunciation.lock.json
 │   ├── scenarios/                 # a_jubilee.json, b_ba117.json, c_route25.json
@@ -155,6 +156,10 @@ RELAY_MOCK_HALLUCINATE=false    # mock LLM injects one false fact per event (dem
 RELAY_PII_RETENTION_HOURS=24
 RELAY_DB_URL=sqlite:///data/relay.db
 TFL_APP_KEY=                    # optional; TfL works without it at low rate
+RELAY_DATA_MODE=demo            # demo | live: start-up source; the console toggle changes it
+RELAY_TFL_LINES=jubilee         # comma-separated TfL line ids, polled in live mode
+RELAY_TFL_POLL_S=60             # real seconds, never time-scaled
+RELAY_TFL_SITE=tube_station
 ```
 
 Voice ids and pronunciation dictionary locators are set per site in `sites/*.yaml`, not in `.env`.

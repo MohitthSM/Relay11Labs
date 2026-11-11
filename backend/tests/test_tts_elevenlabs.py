@@ -190,3 +190,48 @@ def test_dictionary_unchanged_makes_no_write_calls():
 def test_wav_helper_is_valid():
     with wave.open(io.BytesIO(silent_wav(0.25))) as w:
         assert w.getnframes() == 2000
+
+
+# --- voices (scripts/pick_voice.py) ------------------------------------------------------------
+
+
+def _voice(voice_id, *, languages=(), legacy=False, **labels):
+    return SimpleNamespace(
+        voice_id=voice_id, name=voice_id.title(), category="premade", labels=labels,
+        description="", is_legacy=legacy,
+        verified_languages=[SimpleNamespace(language=lang) for lang in languages],
+    )  # fmt: skip
+
+
+def test_list_voices_reads_every_page():
+    pages = {
+        None: SimpleNamespace(voices=[_voice("a", languages=("en", "fr"))], has_more=True,
+                              next_page_token="p2"),
+        "p2": SimpleNamespace(voices=[_voice("b", legacy=True, accent="british")],
+                              has_more=False, next_page_token=None),
+    }  # fmt: skip
+    seen = []
+
+    def search(*, page_size, next_page_token):
+        seen.append(next_page_token)
+        return pages[next_page_token]
+
+    p = provider()
+    p.client.voices = SimpleNamespace(search=search)  # type: ignore[attr-defined]
+    voices = p.list_voices()
+    assert seen == [None, "p2"]
+    assert [(v.voice_id, v.languages, v.legacy) for v in voices] == [
+        ("a", ("en", "fr"), False),
+        ("b", (), True),
+    ]
+    assert voices[1].labels == {"accent": "british"}
+
+
+def test_list_voices_maps_errors():
+    def search(**kwargs):
+        raise ApiError(status_code=401, body="no key")
+
+    p = provider()
+    p.client.voices = SimpleNamespace(search=search)  # type: ignore[attr-defined]
+    with pytest.raises(ProviderError):
+        p.list_voices()

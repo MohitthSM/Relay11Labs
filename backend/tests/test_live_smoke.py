@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from relay.config import Settings
-from relay.providers import build_llm
+from relay.providers import build_llm, build_tts
 from relay.schemas import EventInput
 from relay.script.engine import build_context, generate
 from relay.sites import get_site
@@ -37,3 +37,31 @@ def test_scenario_b_scripts_from_claude():
     assert len(plan.scripts) == 9
     assert plan.llm_calls[0].outcome in ("accepted", "rejected")  # structured output parsed
     assert plan.llm_calls[0].input_tokens > 0
+
+
+@pytest.mark.skipif(not os.environ.get("RELAY_LIVE_ELEVENLABS_API_KEY"), reason="no live key")
+def test_one_clip_from_elevenlabs(tmp_path):
+    """Renders one real announcement on the live model: costs about 0.7 cent."""
+    from sqlmodel import Session
+
+    from relay import voice
+    from relay.db import init_db, make_engine
+
+    settings = Settings(
+        elevenlabs_api_key=os.environ["RELAY_LIVE_ELEVENLABS_API_KEY"],
+        relay_tts_mode="live",
+        audio_dir=str(tmp_path / "audio"),
+    )
+    tts = build_tts(settings)
+    assert tts.mode == "live"
+    engine = make_engine(f"sqlite:///{tmp_path / 'live.db'}")
+    init_db(engine)
+    site = get_site("tube_station")
+    item = voice.Item("Customer information. Holborn and Marylebone are open.", "en")
+    with Session(engine) as session:
+        first = voice.render(session, tts, settings, site, item)
+        again = voice.render(session, tts, settings, site, item)
+    assert first.model_id == "eleven_v4_turbo"
+    assert first.path.suffix == ".mp3" and first.path.stat().st_size > 2000
+    assert first.duration_s > 1.0 and first.characters_billed > 0 and first.ttfa_ms > 0
+    assert again.cache_hit and again.characters_billed == 0  # the cache works on real audio

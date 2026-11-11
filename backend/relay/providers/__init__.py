@@ -1,7 +1,8 @@
 """Provider factory. Only this package may import vendor SDKs (anthropic, elevenlabs, slack).
 
 The LLM is live (Claude) when ANTHROPIC_API_KEY is set and RELAY_LLM_MODE is not "mock".
-TTS, chat and CRM live implementations are not written yet: a key plus mode=live still resolves
+TTS is live (ElevenLabs) when ELEVENLABS_API_KEY is set and RELAY_TTS_MODE is not "mock".
+Chat and CRM live implementations are not written yet: a key plus mode=live still resolves
 to the mock and logs a warning, so the demo never breaks (D13). `mode` on each provider says
 what you got.
 """
@@ -47,13 +48,20 @@ def build_llm(s: Settings) -> LLMProvider:
     return MockLLMProvider(hallucinate=s.relay_mock_hallucinate)
 
 
+def build_tts(s: Settings) -> TTSProvider:
+    if resolve_mode(s.relay_tts_mode, s.elevenlabs_api_key) == "live":
+        from relay.providers.tts_elevenlabs import ElevenLabsProvider  # imports the SDK
+
+        return ElevenLabsProvider(s.elevenlabs_api_key, timeout_s=s.elevenlabs_timeout_s)
+    return MockTTSProvider()
+
+
 def build_connectors(s: Settings) -> Connectors:
-    _warn_if_live("tts", s.relay_tts_mode, s.elevenlabs_api_key)
     _warn_if_live("chat", s.relay_chat_mode, s.slack_bot_token)
     _warn_if_live("crm", s.relay_crm_mode, s.salesforce_access_token)
     return Connectors(
         llm=build_llm(s),
         chat=MockChatProvider(),
         crm=MockSalesforceProvider(),
-        tts=MockTTSProvider(),
+        tts=build_tts(s),
     )

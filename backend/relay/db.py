@@ -14,7 +14,8 @@ def make_engine(url: str | None = None) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    import relay.workflow.models  # noqa: F401  (registers tables)
+    import relay.models  # noqa: F401  (registers tables)
+    import relay.workflow.models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
 

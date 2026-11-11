@@ -9,10 +9,12 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from relay.pronunciation import PronunciationLock, read_locks
 from relay.schemas import EVENT_TYPES
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 SITES_DIR = BACKEND_DIR / "sites"
+STATIC_DIR = BACKEND_DIR / "static"
 
 
 class Zone(BaseModel):
@@ -52,11 +54,35 @@ class Gazetteer(BaseModel):
         return [canonical, *self.aliases.get(canonical, [])]
 
 
+class Segments(BaseModel):
+    """Fixed phrases of one language that are voiced once and reused (voice.split_segments).
+
+    A script that starts with an opening, or ends with a closing, has that part cut off and
+    cached permanently; only what is left (the dynamic middle) is generated each time.
+    """
+
+    openings: list[str] = Field(default_factory=list)
+    closings: list[str] = Field(default_factory=list)
+
+
+class VoiceSettingsConfig(BaseModel):
+    """Optional ElevenLabs voice settings. Unset means the voice's own default."""
+
+    stability: float | None = None
+    similarity_boost: float | None = None
+    style: float | None = None
+    speed: float | None = None
+
+
 class Site(BaseModel):
     id: str
     name: str
     hub_type: str  # underground | airport | bus: picks the system prompt
-    voice_id: str = ""
+    voice_id: str = ""  # ONE voice for the whole hub, in every language
+    voice_settings: VoiceSettingsConfig = Field(default_factory=VoiceSettingsConfig)
+    pronunciation_file: str | None = None  # sites/<name>.pls, synced by sync_pronunciations.py
+    pronunciation: PronunciationLock | None = None  # filled from pronunciation.lock.json
+    segments: dict[str, Segments] = Field(default_factory=dict)  # by language
     style_guide: str
     allowed_terms: list[str] = Field(default_factory=list)  # capitalised words the LLM may write
     zones: list[Zone]
@@ -76,6 +102,8 @@ class Site(BaseModel):
 
 def load_site(path: Path) -> Site:
     site = Site.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    if site.pronunciation_file:
+        site.pronunciation = read_locks(path.parent).get(site.id)
     zone_ids = {z.id for z in site.zones}
     for event_type, policy in site.policies.items():
         if event_type not in EVENT_TYPES:

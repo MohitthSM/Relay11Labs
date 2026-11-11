@@ -54,6 +54,8 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 4: Voice layer
 
+> **Status:** built and tested in mock mode. Done: `tts_base`/`tts_mock`/`tts_elevenlabs` (`sync_dictionary` too), `build_tts`, `models.py` (`AudioClip`, `VoiceRender`), `voice.py` (routing D17, cache, segments and stitching D18, metrics, `stats()`), `pronunciation.py`, `pronsync.py`, `scripts/sync_pronunciations.py`, `static/chime.wav`, `GET /audio/{clip_id}`, tests. **Deviations from the list below:** the dictionary is created with `create_from_rules` (PLS parsed locally) and its id and version go to `sites/pronunciation.lock.json`, not into the site YAML, so YAML comments survive. The chime is WAV and is stitched into the first-language clip. The console play button is not built (no frontend yet). **Still open:** the `-m live` smoke test has never run (no key in the build environment); the default voice is a placeholder taken from the API docs and nobody has listened to it in EN/ES/FR; the `eleven_v4_turbo` vs `eleven_v4` comparison; the IPA in `sites/*.pls` is unverified by ear; `sync_pronunciations.py` has never run against the real API; wiring `voice.render_many` into the events service (Phase 2).
+
 **Goal:** approved scripts become cached audio clips.
 
 - `providers/tts_base.py`, `tts_mock.py` (stdlib `wave`, duration proportional to the text), `tts_elevenlabs.py` (`text_to_speech.convert` with `model_id`, `language_code`, `output_format`, `seed` and `pronunciation_dictionary_locators`).

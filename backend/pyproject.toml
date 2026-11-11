@@ -11,6 +11,10 @@ dependencies = [
   "sqlmodel>=0.0.22",
   "pyyaml>=6",
   "anthropic>=2.7,<3",
+  "elevenlabs>=2.77,<3",
+  "mutagen>=1.48.1",
+  "pydub>=0.25.1",
+  "audioop-lts>=0.2.1 ; python_full_version >= '3.13'",
 ]
 
 [dependency-groups]

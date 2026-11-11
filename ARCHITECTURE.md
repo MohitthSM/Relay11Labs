@@ -38,9 +38,10 @@ Everything runs in one process with one SQLite file. There are no queues, no Red
 | Staff notes | `relay/script/notes.py`, `note_rules.py` | Note → draft event for a human to confirm. Screens injection and out-of-scope notes, extracts on the escalation model, applies the extraction lock (§4), falls back to deterministic rules if the model fails. |
 | Normaliser | `relay/script/normalize.py` | Turns an approved script into spoken text. Spaces out codes (`BA117` → `B A 1 1 7`) and applies per-language time phrasing. Runs **after** the fact lock. |
 | LLM providers | `relay/providers/llm_*.py` | A `LLMProvider` Protocol with an `AnthropicProvider` and a `MockLLMProvider`. |
-| TTS providers | `relay/providers/tts_*.py` | A `TTSProvider` Protocol with an `ElevenLabsProvider` and a `MockTTSProvider`. |
+| TTS providers | `relay/providers/tts_*.py` | A `TTSProvider` Protocol with an `ElevenLabsProvider` (wraps the SDK: `convert`, pronunciation dictionaries, error mapping) and a `MockTTSProvider`. Both expose `synthesize` and `sync_dictionary`. |
 | Pricing | `relay/providers/pricing.py` | Price table: USD per MTok per Claude model and USD per 1K characters per ElevenLabs model. Used only for logging and metrics. |
-| Voice layer | `relay/voice.py` | Hashes the render request, returns the cached clip if present, otherwise calls the TTS provider. Writes the `AudioClip` row and file, and reads the clip duration. |
+| Voice layer | `relay/voice.py` | Routes each announcement to a model (D17), splits off the fixed opening and closing (D18), looks every piece up in the content-hash cache, generates only what is missing (worker threads, capped by `ELEVENLABS_MAX_CONCURRENCY`), stitches chime + segments with pydub, and writes one `VoiceRender` metrics row per announcement. `voice.stats()` aggregates them. |
+| Pronunciation | `relay/pronunciation.py`, `relay/pronsync.py`, `scripts/sync_pronunciations.py`, `sites/*.pls`, `sites/pronunciation.lock.json` | The PLS file is the source of truth. The script creates or updates the ElevenLabs dictionary and writes its id and version to the lock file. `sites.py` attaches that version to the site, so every TTS request carries it. |
 | Scheduler | `relay/scheduler.py` | Every tick: finds due `PlaybackJob`s, checks whether each zone is busy, emits play commands, advances repeat counters, marks jobs done. |
 | Bus | `relay/bus.py` | In-memory fan-out of play commands to connected SSE clients. Each zone subscriber gets an `asyncio.Queue`. |
 | Sources | `relay/sources/tfl.py`, `relay/sources/replay.py` | The TfL line-status poller (Phase 7) and the scenario replayer. Both just call the events service. |
@@ -56,7 +57,8 @@ class LLMProvider(Protocol):
     def complete_json(self, prompt: str, schema: dict, model: str) -> LLMResult: ...  # workflows
 
 class TTSProvider(Protocol):
-    def synthesize(self, req: RenderRequest) -> TTSResult: ...   # bytes + metadata
+    def synthesize(self, req: RenderRequest) -> TTSResult: ...   # bytes + billed characters + ttfb/total ms
+    def sync_dictionary(self, name, rules, existing_id) -> DictionarySync: ...  # create or update
 ```
 
 `LLMResult` carries the output as JSON text (validated by the caller against the same Pydantic model) plus `model`, `input_tokens`, `output_tokens`, `latency_ms` and `stop_reason`. It is **all** that the engine sees, so the engine cannot tell whether it is talking to the mock or to the real provider.
@@ -97,9 +99,18 @@ Announcement                 # one per (event version, language, urgency level)
   clip_id FK -> AudioClip
 
 AudioClip                    # content-addressed cache entry
-  id: str PK                 # sha256(provider, model_id, voice_id, language, settings, spoken_text)
-  path, provider (elevenlabs | mock), model_id, voice_id, language
+  id: str PK                 # sha256 of provider + every RenderRequest field (voice.cache_key)
+  path, kind (segment | announcement), permanent: bool   # permanent = fixed opening/closing
+  provider (elevenlabs | mock), model_id, voice_id, language
   characters, cost_usd, duration_s, created_at, hits: int
+  parts: JSON                # for a stitched announcement: the segment clip ids
+
+VoiceRender                  # one row per announcement voiced, cache hit or not (R7); no text
+  id, event_id, announcement_id (plain ints, no FK yet), language, urgency
+  kind (live | scheduled), model_id, provider, clip_id, cache_hit
+  segments_total, segments_cached
+  characters_total, characters_billed, characters_saved, cost_usd, cost_saved_usd
+  ttfa_ms, total_ms, created_at
 
 PlaybackJob                  # "play this event's sequence in this zone on this cadence"
   id, event_id FK, zone_id
@@ -176,22 +187,23 @@ If the model times out, refuses or returns invalid output, the deterministic rul
    - If attempt 1 **times out**, every slot gets its template at once with no attempt 2 (R10: the announcement must not wait twice). A refusal, provider error or invalid output on attempt 1 goes to the escalation model like a rejection.
 6. **Normalise.** `normalize.py` produces the spoken text. `BA117` becomes `B A 1 1 7`, and the format is consistent across languages. 9 `Announcement` rows are written.
 7. **Render the voice.**
-   - For each announcement, `voice.render()` hashes (provider, model, voice, language, settings, text). On a cache hit it increments `hits` and returns. On a miss it calls `ElevenLabsProvider.synthesize()`:
+   - `voice.render_many()` takes the 9 announcements. Each is routed to a model (D17): level 1 is `live` (`eleven_v4_turbo`), levels 2 and 3 are `scheduled` (`eleven_v4`). A fixed opening or closing is split off (D18; the airport has none, so each clip is one segment). Every piece is looked up by `voice.cache_key()` (provider, model, voice, language, output format, seed, voice settings, pronunciation dictionary version, text). A hit increments `hits` and costs nothing. A miss calls `ElevenLabsProvider.synthesize()`:
      ```python
      client.text_to_speech.convert(
          voice_id=site.voice_id, model_id="eleven_v4_turbo", text=spoken_text,
          language_code="fr", output_format="mp3_44100_128", seed=stable_seed,
          pronunciation_dictionary_locators=[site_dictionary_locator],
-     )
+     )  # model_id is eleven_v4 for the scheduled (level 2 and 3) clips
      ```
-   - Renders run in a thread pool, capped by a semaphore at the plan's concurrency limit (`ELEVENLABS_MAX_CONCURRENCY`, default 2).
-   - The bytes go to `data/audio/<hash>.mp3`, the duration is read with `mutagen`, and an `AudioClip` row is written.
+   - Misses run in worker threads, capped by one process-wide semaphore (`ELEVENLABS_MAX_CONCURRENCY`, default 2). The same segment is never generated twice in a batch: the first announcement to need it pays and the others reuse it. Only the calling thread touches the database.
+   - The bytes go to `data/audio/<hash>.mp3`, the duration is read with `mutagen`, and an `AudioClip` row is written. When there are several segments or a chime, pydub stitches them (150 ms gaps) into a second `AudioClip`, so a repeat is a single lookup.
+   - One `VoiceRender` row per announcement records the model, characters billed and saved, estimated cost, time to first audio and total time.
 8. **Schedule.**
    - The site policy for `passenger_page` is: zones `[gate-23, concourse-b]`, interval 120 s, `max_plays=3`, `escalate=true`.
    - Two `PlaybackJob`s are inserted with `next_at=now`.
 9. **Tick.**
    - Within 1 s, the scheduler sees `gate-23` due and idle. Its `busy_until` is in memory, computed from clip durations.
-   - It picks urgency level `plays_done + 1 = 1` and builds the sequence `[chime, en/1, es/1, fr/1]`.
+   - It picks urgency level `plays_done + 1 = 1` and builds the sequence `[en/1, es/1, fr/1]`. The chime is already stitched into the front of the first-language clip (D18), so the scheduler adds none.
    - It publishes `{zone: "gate-23", event_id, items: [{url: "/audio/<hash>.mp3", caption, language}...]}` to the bus.
    - It sets `busy_until`, increments `plays_done`, sets `next_at += 120 s / RELAY_TIME_SCALE`, and writes a `PlayLog`.
 10. **Play.**
@@ -212,7 +224,7 @@ Time from ingest to first play is dominated by step 3 (about 1–2 s on Haiku) a
 | D4 | **Pre-render every urgency level and language at ingest.** | Playback never waits on generation, and escalation costs no latency. | Some clips are never played (if a page is resolved after play 1). That costs a few hundred TTS characters. |
 | D5 | **Content-hash audio cache.** | Repeats and identical re-issues cost nothing. Scenario C bills one clip for 7 plays. | The cache can grow, so a PII purge job deletes resolved-page clips (R11). |
 | D6 | **ElevenLabs HTTP `convert`, not streaming or WebSocket.** | A PA clip must be complete and approved before it plays. Streaming saves time-to-first-byte, which is irrelevant when the whole clip is queued behind a chime. WebSockets also add connection management. | First play waits for the full render (about 1 s). Switching to `text_to_speech.stream` later is a change inside one provider. |
-| D7 | **`eleven_v4_turbo` as the default TTS model.** See §7. | $0.04 per 1K characters (Flash pricing), 90+ languages, about 100 ms model latency, IPA phoneme dictionaries in non-English languages, and one voice that is fluent across languages. | No SSML or `<break>` support on v4, so pauses come from punctuation and the chime is a separate file. `eleven_v4` ($0.08) can be switched in by config for higher quality. |
+| D7 | **`eleven_v4_turbo` as the default TTS model.** See §7. **Amended by D17:** it is the `live` model; `scheduled` clips use `eleven_v4`. | $0.04 per 1K characters (Flash pricing), 90+ languages, about 100 ms model latency, IPA phoneme dictionaries in non-English languages, and one voice that is fluent across languages. | No SSML or `<break>` support on v4, so pauses come from punctuation and the chime is a separate file. `eleven_v4` ($0.08) can be switched in by config for higher quality. |
 | D8 | **SSE for playback commands, not WebSockets.** | One-way server → browser fits SSE exactly. Native `EventSource` reconnects on its own, and FastAPI returns a `StreamingResponse` with no extra library. | No browser → server channel on the same socket. Acknowledgements use plain `POST`s. |
 | D9 | **The server owns the zone clock.** `busy_until` is computed from clip durations. | One authority for ordering and priority. The browser stays a dumb player. | If a browser tab lags, server and audio drift slightly. This is acceptable for a demo, and real PA hardware would report completion. |
 | D10 | **asyncio scheduler in-process with a 1 s tick, not APScheduler or Celery.** | About 60 lines that can be explained in a review. Jobs live in SQLite, so the next tick after a restart resumes them. | Single process only, which is a non-goal anyway. |
@@ -222,8 +234,10 @@ Time from ingest to first play is dominated by step 3 (about 1–2 s on Haiku) a
 | D14 | **No retries inside providers beyond the SDK defaults.** The engine owns fallback. | One place decides what happens on failure. | None. **Amended (§10):** the workflow engine retries connector calls with backoff. Providers still never retry. |
 | D15 | **System prompts are versioned files, one per hub type, with few-shot examples.** (User decision, Phase 3.) Supersedes "prompts as f-strings in `prompt.py`". | Underground, airport and bus announcements have different registers; a file per hub keeps each readable and diffable, and the version ref on every LLM call ties a script to its prompt. | One more place to look. The user message is still built in code from schema metadata. |
 | D16 | **Value facts are never sent to the LLM, only their placeholder names.** Previous announcements are passed as placeholder drafts too. | The model cannot copy a value wrongly, and passenger names never leave Relay through the LLM (R11). | The model cannot adjust grammar to a value (gender, elision); D1 already accepts this. |
+| D17 | **Model routing is a config table keyed by render kind.** `live` (first play, updates, resolution messages) uses `ELEVENLABS_MODEL_LIVE` (`eleven_v4_turbo`, about 100 ms). `scheduled` (urgency levels 2 and 3, rendered ahead of their play) uses `ELEVENLABS_MODEL_SCHEDULED` (`eleven_v4`, highest quality). `voice.render_kind(urgency, is_resolution)` picks the kind, and the model is logged on every `VoiceRender` row. (User decision, Phase 4.) | Nobody waits on a clip that plays minutes later, so it can use the slower, better model. The model is part of the cache key, so an announcement always maps to one model. | A repeat of the same clip is a cache hit and is **not** re-rendered on the better model: "repeats cost zero characters" wins. `scheduled` is twice the price: scenario B's 9 clips cost about $0.085 instead of $0.05. |
+| D18 | **Fixed phrases are voiced once; only the dynamic middle is generated.** Each site lists `segments` per language (`openings`, `closings`). A script that starts or ends with one has it cut off (exact match, on a sentence boundary). Those clips are `permanent`. The chime is a static `static/chime.wav`, stitched in front of the **first language** of a sequence only, with pydub. The stitched announcement is cached as well. | Updates, the same opening on every announcement, and the apology at the end stop costing characters, and the opening sounds identical every time. | Prosody can change at a seam, so the middle is sent with `previous_text` and `next_text` (supported on v4, not v3) and gaps are 150 ms. Only wording that matches a configured phrase exactly is split, so the airport pages have no fixed parts. The chime is WAV so mock mode needs no ffmpeg; live MP3 stitching needs `ffmpeg` installed. |
 
-## 7. ElevenLabs: what the current docs say (checked 2026-11-10)
+## 7. ElevenLabs: what the current docs say (checked 2026-11-10; model IDs, prices and the pronunciation and request-stitching endpoints re-checked 2026-11-11)
 
 Sources: elevenlabs.io/docs (models, text-to-speech capability, Eleven v4, best-practices, pronunciation-dictionaries guide, streaming guide, request-stitching guide, latency guide, TTS `convert` API reference, models/concurrency) and elevenlabs.io/pricing/api. PyPI `elevenlabs` latest stable is **2.77.0** (a `3.0.0a1` pre-release also exists).
 
@@ -242,13 +256,14 @@ Sources: elevenlabs.io/docs (models, text-to-speech capability, Eleven v4, best-
 **Facts that shaped the design:**
 - **One voice, many languages.** On v4, when the target language differs from the voice's language, the output is fluent native speech, not accented speech. One brand voice serves EN/ES/FR. This is a pitch point.
 - **Pronunciation dictionaries:**
-  - Created from a PLS file with `client.pronunciation_dictionaries.create_from_file(file=..., name=...)`.
+  - Phase 4 creates them with `client.pronunciation_dictionaries.create_from_rules(name=..., rules=[...])` (the PLS file is parsed locally; `create_from_file` also exists) and updates them in place with `rules.add` (replaces a rule with the same `string_to_replace`) and `rules.remove`. Each write returns a new `version_id`.
   - Passed to a request as `pronunciation_dictionary_locators=[PronunciationDictionaryVersionLocator(pronunciation_dictionary_id, version_id)]`, with at most 3 per request.
   - Phoneme rules (IPA/CMU) work only on `eleven_v4`, `eleven_v4_turbo`, `eleven_flash_v2` and `eleven_v3`. Other models need alias rules.
   - Non-English IPA needs v4.
   - Matching is case-sensitive.
   - Relay keeps one PLS per site (station names such as Marylebone, Southwark, Holborn) and uploads it once with `scripts/sync_pronunciations.py`.
 - **`convert` parameters Relay uses:** `language_code` (ISO 639-1), `seed` (best-effort determinism), `output_format` (default `mp3_44100_128`; 192 kbps needs Creator, 44.1 kHz PCM/WAV needs Pro), `pronunciation_dictionary_locators`, and optionally `apply_text_normalization`.
+- **Request stitching:** `previous_text` and `next_text` on `convert` give continuity between separate generations. Not available on `eleven_v3`; the docs list v4 as supported.
 - **SSML:** v4 does not support SSML or `<break>`. Pauses come from punctuation, and the chime is a separate static file.
 - **`audio_effects`** (filter preset, distance, environment reverb, background noise, pan) is available on `convert` at no extra cost. Reverb or pan produce stereo, which is rejected with mono PCM, but MP3 is fine. Phase 8 tries a "station hall" environment and a PA-style filter preset so the demo sounds like a real tannoy. Preset ids come from the audio effects catalog endpoint.
 - **Concurrency** (multilingual-class / Flash-class requests): Free 2/4, Starter 3/6, Creator 5/10, Pro 10/20. Excess requests queue (about 50 ms added), they are not rejected. Relay caps in-flight renders with `ELEVENLABS_MAX_CONCURRENCY`.
@@ -261,10 +276,10 @@ Sources: elevenlabs.io/docs (models, text-to-speech capability, Eleven v4, best-
 
 | Item | Estimate |
 |---|---|
-| TTS characters: A about 3 versions × 200, B 9 clips × 200, C 1 × 150 | ≈ 2,600 chars × $0.04/1K ≈ **$0.10** |
+| TTS characters: A about 3 versions × 200 (the fixed opening and closing are voiced once), B 9 clips × 140, C 1 × 150. With D17, B's six level 2 and 3 clips cost $0.08/1K, the rest $0.04/1K | ≈ 2,400 chars ≈ **$0.11** |
 | LLM: about 5 Haiku 5.5 calls, ≈ 2K input / 0.8K output each at $0.10 / $0.50 per MTok | ≈ **$0.003** |
 | LLM: about 2 Sonnet 5.5 calls (retry and staff note) at $2 / $10 per MTok | ≈ **$0.03** |
-| **Total** | **≈ $0.15**. A warm-cache rerun costs only the LLM calls. |
+| **Total** | **≈ $0.16**. A warm-cache rerun costs only the LLM calls. |
 
 Prices live in `providers/pricing.py`. Check them against the provider pages before the pitch.
 

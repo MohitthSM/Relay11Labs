@@ -1,13 +1,20 @@
 id: tube_station
 name: Canary Wharf Underground station
 hub_type: underground
-voice_id: ""            # chosen by listening in Phase 4
+voice_id: JBFqnCBsd6RMkjVDRZzb   # PLACEHOLDER: a stock ElevenLabs voice taken from the API docs example.
+                              # Listen in EN/ES/FR and replace before the pitch (PLAN open items).
+voice_settings: {}      # optional: stability, similarity_boost, style, speed
 style_guide: |
   Calm, plain and brief. Open disruption messages with "Customer information."
   Say the line, then what is happening, then the cause if known, then the advice.
   Prefer "consider alternative routes" to telling people what to do.
   Apologise once, at the end, only for disruption. Never speculate about when it will end.
+pronunciation_file: tube_station.pls
 allowed_terms: [Underground, London]
+segments:                 # fixed phrases: voiced once, cached permanently, stitched around the middle
+  en:
+    openings: ["This is an update. Customer information.", "Customer information."]
+    closings: ["Please consider alternative routes. We apologise for the disruption."]
 zones:
   - {id: jubilee-eb, name: Jubilee eastbound platform, languages: [en]}
   - {id: jubilee-wb, name: Jubilee westbound platform, languages: [en]}

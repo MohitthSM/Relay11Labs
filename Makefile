@@ -1,4 +1,4 @@
-.PHONY: setup dev test lint fmt demo-a demo-b demo-c
+.PHONY: setup dev test lint fmt sync-pronunciations demo-a demo-b demo-c
 setup:
 	cd backend && uv sync
 	@test -f frontend/package.json && cd frontend && npm install || true
@@ -10,5 +10,7 @@ lint:
 	cd backend && uv run ruff check . && uv run ruff format --check .
 fmt:
 	cd backend && uv run ruff format . && uv run ruff check --fix .
+sync-pronunciations:
+	cd backend && uv run python scripts/sync_pronunciations.py
 demo-a demo-b demo-c:
 	curl -X POST localhost:8000/scenarios/$(subst demo-,,$@)/run

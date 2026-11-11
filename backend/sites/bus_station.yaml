@@ -1,11 +1,17 @@
 id: bus_station
 name: Victoria Coach and Bus Station
 hub_type: bus
-voice_id: ""            # chosen by listening in Phase 4
+voice_id: JBFqnCBsd6RMkjVDRZzb   # PLACEHOLDER: a stock ElevenLabs voice taken from the API docs example.
+                              # Listen in EN/ES/FR and replace before the pitch (PLAN open items).
+voice_settings: {}      # optional: stability, similarity_boost, style, speed
 style_guide: |
   Short and practical. Lead with the route number. Say the new stand, then the old one,
   then tell people where to go. Repeat the new stand at the end.
+pronunciation_file: bus_station.pls
 allowed_terms: [Stand, Route, Bus]
+segments:
+  en:
+    openings: ["This is an update. Customer information.", "Customer information."]
 zones:
   - {id: concourse, name: Bus station concourse, languages: [en]}
   - {id: stand-b, name: Stand B, languages: [en]}

@@ -1,7 +1,8 @@
 """Scenario feed and speed control.
 
 POST /scenarios/{name}/run?speed=60&auto_approve=true   start a scenario in the background
-                                      (A, B or C); auto_approve plays held events unattended
+                                      (A, B or C); auto_approve plays held events unattended;
+                                      409 in live mode (PUT /source switches it)
 GET  /scenarios                       the scenarios and the current speed
 GET  /scenarios/runs/{run_id}         progress of a run
 GET/PUT /speed                        time scale: 60 means one minute passes in one second
@@ -18,7 +19,7 @@ from pydantic import BaseModel, Field
 from relay import timeutil
 from relay.context import Context
 from relay.providers.llm_mock import MockLLMProvider
-from relay.sources import replay
+from relay.sources import replay, tfl
 
 
 class SpeedBody(BaseModel):
@@ -29,7 +30,7 @@ class HallucinateBody(BaseModel):
     enabled: bool
 
 
-def build_router(ctx: Context) -> APIRouter:
+def build_router(ctx: Context, feed: tfl.FeedState) -> APIRouter:
     router = APIRouter()
     runs: dict[str, replay.RunStatus] = {}
     tasks: set[asyncio.Task] = set()  # keep references so a run is not garbage-collected
@@ -54,6 +55,8 @@ def build_router(ctx: Context) -> APIRouter:
         scenario = replay.get_scenario(name)
         if scenario is None:
             raise HTTPException(404, "no such scenario")
+        if feed.mode == "live":
+            raise HTTPException(409, "scripted scenarios run in demo mode: switch the source")
         if speed is not None:
             timeutil.set_scale(speed)
         status = replay.RunStatus(run_id=uuid4().hex[:12], scenario=name)

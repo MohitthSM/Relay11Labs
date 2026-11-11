@@ -224,7 +224,23 @@ export type PlayCommand = {
   resumed: boolean;
 };
 
+// GET /source and the {type: "source"} WebSocket message (Phase 7)
+export type DataMode = "demo" | "live";
+export type SourceStatus = {
+  mode: DataMode;
+  status: "off" | "waiting" | "ok" | "error" | "stale";
+  warning: string | null;
+  lines: { id: string; name: string; status: string | null; severity: number }[];
+  line_errors: Record<string, string>;
+  last_ok_at: string | null;
+  failures: number;
+  poll_s: number;
+  app_key: boolean;
+  flights: "mock" | "live";
+};
+
 export type StateMessage =
+  | ({ type: "source" } & Omit<SourceStatus, "flights">)
   | { type: "snapshot"; active: { event_id: number; site_id: string; event_type: string; version: number }[] }
   | {
       type: "event.created" | "event.updated" | "event.resolved" | "event.approved";

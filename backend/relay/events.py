@@ -118,7 +118,7 @@ def update(
     if probe.payload.model_dump() == current.payload:
         log.info("event %s: identical update ignored", current.id)
         return current
-    previous = _previous_drafts(session, current)
+    previous = previous_drafts(session, current)
     current.state = SUPERSEDED
     session.add(current)
     assert current.id is not None
@@ -276,7 +276,7 @@ def _persist_plan(
     return rows
 
 
-def _previous_drafts(session: Session, event: Event) -> list[str]:
+def previous_drafts(session: Session, event: Event) -> list[str]:
     """The placeholder draft the last version said first (for the 'This is an update' prompt)."""
     first = session.exec(
         select(Announcement)

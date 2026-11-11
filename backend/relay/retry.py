@@ -1,4 +1,5 @@
-"""Retry with exponential backoff for connector calls (amends D14, see ARCHITECTURE §10)."""
+"""Retry with exponential backoff for TTS calls (voice.py). The LLM is not retried here: the
+script engine owns LLM retries (D14)."""
 
 import logging
 from collections.abc import Callable
@@ -27,6 +28,6 @@ def call_with_retry[T](
             if not exc.retryable or attempt >= max_attempts:
                 raise
             delay = backoff_delay(attempt, base_delay_s)
-            log.warning("connector call failed (attempt %d), retrying in %.2fs", attempt, delay)
+            log.warning("call failed (attempt %d), retrying in %.2fs", attempt, delay)
             timeutil.sleep(delay)
             attempt += 1

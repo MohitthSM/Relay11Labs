@@ -33,8 +33,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 from pydub import AudioSegment
-from sqlalchemy import Integer, cast, func
-from sqlmodel import Session, select
+from sqlalchemy import Integer, cast, func, select
+from sqlmodel import Session, col
 
 from relay.config import Settings
 from relay.models import AudioClip, VoiceRender
@@ -48,8 +48,8 @@ from relay.providers.tts_base import (
     VoiceSettings,
     audio_duration,
 )
+from relay.retry import call_with_retry
 from relay.sites import STATIC_DIR, Segments, Site
-from relay.workflow.retry import call_with_retry
 
 log = logging.getLogger(__name__)
 
@@ -281,7 +281,8 @@ def _plan(item: Item, provider: str, settings: Settings, site: Site) -> _Plan:
     if not item.text.strip():
         raise ValueError("cannot voice empty text")
     model_id = route_model(item.kind, settings)
-    parts = split_segments(item.text, site.segments.get(item.language))
+    segments = site.segments.get(item.language) if settings.voice_split_segments else None
+    parts = split_segments(item.text, segments)
     by_role = dict(parts)
     segs = []
     for role, text in parts:
@@ -610,7 +611,7 @@ class VoiceStats(BaseModel):
 def stats(session: Session) -> VoiceStats:
     """Aggregate the VoiceRender rows. No passenger data is in them."""
     v = VoiceRender
-    row = session.exec(
+    row = session.execute(
         select(
             func.count(),
             func.coalesce(func.sum(cast(v.cache_hit, Integer)), 0),
@@ -625,10 +626,10 @@ def stats(session: Session) -> VoiceStats:
         )
     ).one()
     renders, hits, seg_total, seg_cached, billed, saved, cost, cost_saved, ttfa, total = row
-    models = session.exec(
-        select(v.model_id, func.count(), func.sum(v.characters_billed), func.sum(v.cost_usd))
-        .group_by(v.model_id)
-        .order_by(v.model_id)
+    models = session.execute(
+        select(col(v.model_id), func.count(), func.sum(v.characters_billed), func.sum(v.cost_usd))
+        .group_by(col(v.model_id))
+        .order_by(col(v.model_id))
     ).all()
     return VoiceStats(
         renders=renders,

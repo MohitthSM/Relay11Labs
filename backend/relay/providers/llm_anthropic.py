@@ -45,23 +45,6 @@ class AnthropicLLMProvider:
     def extract_event(self, req: ExtractRequest, model: str) -> LLMResult:
         return self._parse(model, req.system, req.user, NoteExtraction)
 
-    def complete_json(self, prompt: str, schema: dict[str, Any], model: str) -> LLMResult:
-        started = time.perf_counter()
-        resp = _call(
-            lambda: self.client.messages.create(
-                model=model,
-                max_tokens=MAX_TOKENS,
-                output_config={
-                    "effort": "low",
-                    "format": {"type": "json_schema", "schema": schema},
-                },
-                messages=[{"role": "user", "content": prompt}],
-            )
-        )
-        _raise_on_refusal(resp.stop_reason)
-        text = next((b.text for b in resp.content if b.type == "text"), "")
-        return _result(resp, text, started)
-
     def _parse(self, model: str, system: str, user: str, output: type[BaseModel]) -> LLMResult:
         started = time.perf_counter()
         kwargs: dict[str, Any] = {

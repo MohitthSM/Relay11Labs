@@ -13,14 +13,9 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     elevenlabs_api_key: str = ""
-    slack_bot_token: str = ""
-    slack_signing_secret: str = ""
-    salesforce_access_token: str = ""
 
     relay_llm_mode: Mode = "auto"
     relay_tts_mode: Mode = "auto"
-    relay_chat_mode: Mode = "auto"
-    relay_crm_mode: Mode = "auto"
 
     script_model_default: str = "claude-haiku-5-5"
     script_model_escalation: str = "claude-sonnet-5-5"
@@ -38,9 +33,10 @@ class Settings(BaseSettings):
     elevenlabs_max_concurrency: int = 2
     elevenlabs_timeout_s: float = 20.0
     audio_dir: str = "data/audio"
+    # Cut fixed openings/closings off scripts and voice them once (D18). Off: every announcement
+    # is voiced whole, so it is one clip per announcement and nothing is stitched but the chime.
+    voice_split_segments: bool = True
 
-    connector_max_attempts: int = 4
-    connector_base_delay_s: float = 0.5
     prompts_dir: str = "prompts"
 
 

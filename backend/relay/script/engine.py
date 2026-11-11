@@ -186,6 +186,7 @@ def generate(
                     Rejection(attempt=attempt, model=result.model, violations=violations)
                 )
             else:
+                assert draft is not None
                 accepted[slot] = _slot(draft, slot, event.type, facts, "llm", result.model)
         if failed and rec.outcome == "accepted":
             rec.outcome = "rejected"
@@ -239,7 +240,12 @@ def parse_batch(text: str) -> tuple[dict[Slot, str], str | None]:
 
 
 def _slot(
-    draft: str, slot: Slot, event_type: str, facts: dict, source: str, model: str | None
+    draft: str,
+    slot: Slot,
+    event_type: str,
+    facts: dict,
+    source: Literal["llm", "template"],
+    model: str | None,
 ) -> ScriptSlot:
     lang, urgency = slot
     text = templates.fill(draft, facts)

@@ -30,7 +30,7 @@ Everything runs in one process with one SQLite file. There are no queues, no Red
 | Config | `relay/config.py` | `pydantic-settings` reads `.env`. Picks mock or live per provider: live only if the key is present **and** the mode is not forced to `mock`. |
 | Sites | `relay/sites.py`, `backend/sites/*.yaml` | Static config for each site: zones, languages, voice, house style, the event-type → zones routing, the repeat policy and the gazetteer (known stations, lines, gates, stands). Loaded once at startup. |
 | Event schemas | `relay/schemas.py` | Pydantic v2 models, one per event type (a discriminated union on `type`). The single definition of what a "fact" is. |
-| Events service | `relay/events.py` | Creates, updates and resolves events. Bumps `version`. Calls the script engine and the voice layer, then hands off to the scheduler. |
+| Events service | `relay/events.py` | `create`, `update` (version bump, previous row superseded) and `resolve` (a line gets a generated good-service message, SPEC F4). Each call runs the script engine, writes the `LLMCall` and `Announcement` rows, calls `voice.render_many`, publishes a state change, and (Phase 5) hands off to the scheduler. Errors are `EventError` with an HTTP status. |
 | Script engine | `relay/script/engine.py` | For each language × urgency level: calls the LLM, runs the fact lock, retries once on the escalation model, then falls back to the template. Input: the event plus a `ScriptContext` (site with hub type and style guide, zone languages, previous announcements, repeat count). Output: a `ScriptPlan` (script per language and urgency, priority, repeat interval, expiry, facts used, LLM call records). It writes nothing; the events service persists the plan as `LLMCall` and `Announcement` rows. |
 | Fact lock | `relay/script/factlock.py` | A pure function `check(script, event, site, lang) -> list[Violation]`. No I/O. Heavily unit-tested. |
 | Templates | `relay/script/templates.py` | Deterministic wording per (event type, urgency, language). Uses `str.format` with the same placeholders as the LLM output. |
@@ -43,9 +43,9 @@ Everything runs in one process with one SQLite file. There are no queues, no Red
 | Voice layer | `relay/voice.py` | Routes each announcement to a model (D17), splits off the fixed opening and closing (D18), looks every piece up in the content-hash cache, generates only what is missing (worker threads, capped by `ELEVENLABS_MAX_CONCURRENCY`), stitches chime + segments with pydub, and writes one `VoiceRender` metrics row per announcement. `voice.stats()` aggregates them. |
 | Pronunciation | `relay/pronunciation.py`, `relay/pronsync.py`, `scripts/sync_pronunciations.py`, `sites/*.pls`, `sites/pronunciation.lock.json` | The PLS file is the source of truth. The script creates or updates the ElevenLabs dictionary and writes its id and version to the lock file. `sites.py` attaches that version to the site, so every TTS request carries it. |
 | Scheduler | `relay/scheduler.py` | Every tick: finds due `PlaybackJob`s, checks whether each zone is busy, emits play commands, advances repeat counters, marks jobs done. |
-| Bus | `relay/bus.py` | In-memory fan-out of play commands to connected SSE clients. Each zone subscriber gets an `asyncio.Queue`. |
-| Sources | `relay/sources/tfl.py`, `relay/sources/replay.py` | The TfL line-status poller (Phase 7) and the scenario replayer. Both just call the events service. |
-| API | `relay/api/*.py` | FastAPI routers: `events`, `playback` (SSE + audio files), `metrics`, `scenarios`. |
+| Bus | `relay/bus.py` | In-memory fan-out. Phase 2: event state changes to `/ws/events` WebSocket clients. Phase 5: play commands to SSE clients. Each subscriber gets an `asyncio.Queue`; `publish` is safe to call from the threadpool. |
+| Sources | `relay/sources/replay.py`, `relay/sources/tfl.py` | The scenario replayer (Phase 2) and the TfL line-status poller (Phase 7). Both just call the events service. The replayer waits through `timeutil`, so the speed control scales it; a replayed `create` on a still-active event becomes an update. |
+| API | `relay/api/*.py` | FastAPI routers: `events` (CRUD, versioned update, resolve, staff-note draft), `ws` (state changes), `playback` (audio files now, SSE in Phase 5), `scenarios` (run A/B/C, speed control), `metrics` (Phase 6). `GET /health` reports `llm` and `tts` as `mock` or `live`. |
 | Frontend | `frontend/src/` | Console (event list, form, staff note, announcement inspector), Zones (one panel per zone with an `<audio>` queue), Metrics. |
 
 ### Provider interfaces (the only seams for external services)
@@ -54,7 +54,6 @@ Everything runs in one process with one SQLite file. There are no queues, no Red
 class LLMProvider(Protocol):
     def generate_scripts(self, req: ScriptRequest, model: str) -> LLMResult: ...   # ScriptBatch JSON
     def extract_event(self, req: ExtractRequest, model: str) -> LLMResult: ...     # NoteExtraction JSON
-    def complete_json(self, prompt: str, schema: dict, model: str) -> LLMResult: ...  # workflows
 
 class TTSProvider(Protocol):
     def synthesize(self, req: RenderRequest) -> TTSResult: ...   # bytes + billed characters + ttfb/total ms
@@ -92,7 +91,9 @@ LLMCall                      # one row per API attempt; feeds the metrics page
 
 Announcement                 # one per (event version, language, urgency level)
   id, event_id FK, language, urgency (1..3), is_resolution: bool
+  draft: str                 # as written, with {placeholders} (never contains a name)
   script: str                # with placeholders filled, as checked by the fact lock
+  model: str | None, rejections: JSON, audio_error: str | None
   spoken_text: str           # after normalize.py; what is sent to TTS
   source: llm | template
   llm_call_id FK | None      # which call produced the accepted script
@@ -118,7 +119,7 @@ PlaybackJob                  # "play this event's sequence in this zone on this 
   escalate: bool             # if true, play urgency = min(plays_done + 1, 3)
   priority, state: scheduled | done | cancelled
 
-PlayLog
+PlayLog                      # Phase 5 writes it; the table exists from Phase 2
   id, job_id FK, zone_id, announcement_ids: JSON, played_at
 ```
 
@@ -225,13 +226,13 @@ Time from ingest to first play is dominated by step 3 (about 1–2 s on Haiku) a
 | D5 | **Content-hash audio cache.** | Repeats and identical re-issues cost nothing. Scenario C bills one clip for 7 plays. | The cache can grow, so a PII purge job deletes resolved-page clips (R11). |
 | D6 | **ElevenLabs HTTP `convert`, not streaming or WebSocket.** | A PA clip must be complete and approved before it plays. Streaming saves time-to-first-byte, which is irrelevant when the whole clip is queued behind a chime. WebSockets also add connection management. | First play waits for the full render (about 1 s). Switching to `text_to_speech.stream` later is a change inside one provider. |
 | D7 | **`eleven_v4_turbo` as the default TTS model.** See §7. **Amended by D17:** it is the `live` model; `scheduled` clips use `eleven_v4`. | $0.04 per 1K characters (Flash pricing), 90+ languages, about 100 ms model latency, IPA phoneme dictionaries in non-English languages, and one voice that is fluent across languages. | No SSML or `<break>` support on v4, so pauses come from punctuation and the chime is a separate file. `eleven_v4` ($0.08) can be switched in by config for higher quality. |
-| D8 | **SSE for playback commands, not WebSockets.** | One-way server → browser fits SSE exactly. Native `EventSource` reconnects on its own, and FastAPI returns a `StreamingResponse` with no extra library. | No browser → server channel on the same socket. Acknowledgements use plain `POST`s. |
+| D8 | **SSE for playback commands (Phase 5). WebSocket for console state changes (`/ws/events`, Phase 2).** (User decision, Phase 2: amends "SSE, not WebSockets".) | Playback commands are one-way server to browser, which SSE fits, with native `EventSource` reconnect. The console wants a push when an event is created, updated or resolved, and the Phase 2 brief asked for a WebSocket. The message carries ids and state only, so the client re-fetches details and no names travel on it. | Two push transports in one app. Playback acknowledgements still use plain `POST`s. If the two should become one, move state changes onto the SSE stream. |
 | D9 | **The server owns the zone clock.** `busy_until` is computed from clip durations. | One authority for ordering and priority. The browser stays a dumb player. | If a browser tab lags, server and audio drift slightly. This is acceptable for a demo, and real PA hardware would report completion. |
 | D10 | **asyncio scheduler in-process with a 1 s tick, not APScheduler or Celery.** | About 60 lines that can be explained in a review. Jobs live in SQLite, so the next tick after a restart resumes them. | Single process only, which is a non-goal anyway. |
 | D11 | **`RELAY_TIME_SCALE`** divides every interval. | A 20-minute scenario C runs in 20 s on stage, and tests run instantly. | Every interval must go through one helper (`scaled(seconds)`), which CLAUDE.md enforces. |
 | D12 | **Sites as YAML, not DB tables.** | Zones, policies and house style are config that changes rarely and belongs in version control. | Changing them needs a restart. |
 | D13 | **Mock mode chosen automatically when a key is missing.** It can also be forced per provider. | "The demo never breaks." A dead key on stage degrades to mock and does not crash. | Live failures could be hidden, so the console header always shows `LLM: live/mock · TTS: live/mock`. |
-| D14 | **No retries inside providers beyond the SDK defaults.** The engine owns fallback. | One place decides what happens on failure. | None. **Amended (§10):** the workflow engine retries connector calls with backoff. Providers still never retry. |
+| D14 | **Retries have one owner per provider kind.** Providers never retry beyond the SDK defaults. The **script engine owns LLM retries**: one retry, on the escalation model, with the violations as feedback, then the template (a timeout skips the retry, R10). **`voice.py` owns TTS retries**: one retry of a retryable `ProviderError` (429, 5xx, timeout) with backoff through `relay/retry.py`, time-scaled. (Amended in Phase 2; it replaces the earlier note about a workflow engine, which was removed as out of scope.) | One place decides what happens on failure, and it is the layer that knows the fallback: a template for text, a failed clip shown as `audio_error` for audio. | Two small retry policies instead of one. A failed render is not hidden: the announcement keeps its text and the API still answers 2xx. |
 | D15 | **System prompts are versioned files, one per hub type, with few-shot examples.** (User decision, Phase 3.) Supersedes "prompts as f-strings in `prompt.py`". | Underground, airport and bus announcements have different registers; a file per hub keeps each readable and diffable, and the version ref on every LLM call ties a script to its prompt. | One more place to look. The user message is still built in code from schema metadata. |
 | D16 | **Value facts are never sent to the LLM, only their placeholder names.** Previous announcements are passed as placeholder drafts too. | The model cannot copy a value wrongly, and passenger names never leave Relay through the LLM (R11). | The model cannot adjust grammar to a value (gender, elision); D1 already accepts this. |
 | D17 | **Model routing is a config table keyed by render kind.** `live` (first play, updates, resolution messages) uses `ELEVENLABS_MODEL_LIVE` (`eleven_v4_turbo`, about 100 ms). `scheduled` (urgency levels 2 and 3, rendered ahead of their play) uses `ELEVENLABS_MODEL_SCHEDULED` (`eleven_v4`, highest quality). `voice.render_kind(urgency, is_resolution)` picks the kind, and the model is logged on every `VoiceRender` row. (User decision, Phase 4.) | Nobody waits on a clip that plays minutes later, so it can use the slower, better model. The model is part of the cache key, so an announcement always maps to one model. | A repeat of the same clip is a cache hit and is **not** re-rendered on the better model: "repeats cost zero characters" wins. `scheduled` is twice the price: scenario B's 9 clips cost about $0.085 instead of $0.05. |
@@ -294,19 +295,3 @@ Prices live in `providers/pricing.py`. Check them against the provider pages bef
 - **Prompt caching** is not used in the demo. The prompts are small and the cost is negligible. Revisit if per-site style guides grow.
 - **Structured outputs on `claude-haiku-5-5`: not yet verified live** (no key in the Phase 3 build environment). The provider uses `messages.parse`; its request shape is covered by a stub-client test, and `tests/test_live_smoke.py` (`-m live`) verifies it once a key is set. If Haiku rejects it, switch that provider to JSON-in-text validated by the same Pydantic model and record the change here.
 - Installed SDK: `anthropic` 2.7.0. Server-side refusal fallback uses `client.beta.messages.parse(..., betas=["server-side-fallback-2026-07-01"], fallbacks="default")`, Sonnet only.
-
-## 10. Workflow core (`relay/workflow/`)
-
-A generic layer for multi-step automations: one trigger plus ordered, typed steps. It sits beside the announcement pipeline and reuses the same provider seams. Added in the "framework core" change; the announcement pipeline does not depend on it yet.
-
-- **Definition.** `Workflow(name, trigger, steps)`. A trigger is `webhook`, `schedule` or `slack_command`, with a Pydantic payload model. A step has a Pydantic input and output model and one of four kinds:
-  - `deterministic`: a pure function.
-  - `llm`: renders a prompt file, asks for JSON, validates it against the output model, and retries **once** with the validation error appended. A second failure dead-letters the run.
-  - `approval`: pauses the run (`paused`) until `POST /runs/{id}/approval`. The first decision wins and repeats are no-ops. A rejection ends the run as `rejected`.
-  - `action`: a side effect through a connector.
-- **State.** `WorkflowRun` holds status, trigger payload, step outputs and `current_step` in SQLite, saved after every step. `recover()` at startup continues `running` runs. `paused` runs wait for their approval, across restarts.
-- **Idempotency.** Triggers: unique `(workflow, idempotency_key)`, and a repeat returns the existing run (webhook header `Idempotency-Key`, Slack `trigger_id`, schedule slot number). Actions: key `"{run_id}:{step}"` is stored in `ActionRecord` and also passed to the connector, so a crash between the side effect and the commit still cannot double-post.
-- **Retries.** `retry.call_with_retry` retries only `ProviderError(retryable=True)`: delay `base * 2^n`, capped at 30 s, through `timeutil.sleep` (time-scaled). A failure that is not retryable, or is out of attempts, sets the run to `dead_letter` with `failed_step` and `error`. `POST /runs/{id}/requeue` resumes at the failed step.
-- **Tracing.** One `StepRun` per executed step: input, output, status, prompt name and version, model, tokens, cost, latency, connector attempts, per-call detail for LLM steps, error. Payloads in workflows must not contain passenger names (CLAUDE.md rule 6).
-- **Connectors** (all in `providers/`, each with a mock that supports `failures.fail_next(n)`): `LLMProvider.complete_json`, `ChatProvider` (Slack), `CRMProvider` (mock Salesforce), `TTSProvider` (ElevenLabs). Live implementations are **not written yet**; a key still resolves to the mock with a warning.
-- **Prompts** are files `backend/prompts/<name>.v<N>.md` using `$var` placeholders, loaded by `relay/prompts.py` (shared with the script engine). The highest version is used unless a step pins one.

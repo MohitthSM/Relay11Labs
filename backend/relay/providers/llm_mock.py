@@ -4,7 +4,6 @@
   (RELAY_MOCK_HALLUCINATE) it adds one invented fact to the last slot, on every attempt, so the
   fact lock rejects it, the retry is rejected too, and the template is used (the stage demo).
 - extract_event: the deterministic staff-note rules (script/note_rules.py).
-- complete_json: scripted responses, or a minimal value that fills the JSON schema.
 
 Tests can queue exact responses in `responses` (JSON text, or an Exception to raise); they are
 consumed in order by whichever method is called next.
@@ -38,33 +37,6 @@ HALLUCINATIONS = {
 }
 
 
-def fill_schema(schema: dict[str, Any], root: dict[str, Any] | None = None) -> Any:
-    """Build a minimal valid value for a JSON schema (enough for Pydantic models)."""
-    root = root or schema
-    if "$ref" in schema:
-        node = root
-        for part in schema["$ref"].removeprefix("#/").split("/"):
-            node = node[part]
-        return fill_schema(node, root)
-    if "enum" in schema:
-        return schema["enum"][0]
-    if "anyOf" in schema:
-        options = [s for s in schema["anyOf"] if s.get("type") != "null"]
-        return fill_schema(options[0], root) if options else None
-    kind = schema.get("type")
-    if kind == "object":
-        return {k: fill_schema(v, root) for k, v in schema.get("properties", {}).items()}
-    if kind == "array":
-        return []
-    if kind == "integer":
-        return 0
-    if kind == "number":
-        return 0.0
-    if kind == "boolean":
-        return False
-    return "mock"
-
-
 class MockLLMProvider:
     mode = "mock"
 
@@ -89,9 +61,6 @@ class MockLLMProvider:
             output_tokens=len(item) // 4,
             latency_ms=1,
         )
-
-    def complete_json(self, prompt: str, schema: dict[str, Any], model: str) -> LLMResult:
-        return self._next("json", prompt, model, json.dumps(fill_schema(schema)))
 
     def generate_scripts(self, req: ScriptRequest, model: str) -> LLMResult:
         scripts = []

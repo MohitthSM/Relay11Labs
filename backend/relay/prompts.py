@@ -1,6 +1,6 @@
 """Versioned prompt files: prompts/<name>.v<N>.md, rendered with string.Template ($var).
 
-Shared by the script engine (system prompts per hub type) and the workflow engine.
+Used by the script engine (system prompts per hub type).
 """
 
 import re

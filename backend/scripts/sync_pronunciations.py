@@ -21,7 +21,7 @@ from relay.sites import SITES_DIR, load_sites
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument(
         "sites", nargs="*", help="site ids (default: all with a pronunciation_file)"
     )

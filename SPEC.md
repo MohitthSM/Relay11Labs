@@ -48,7 +48,7 @@ They need to see three things: why voice quality and multilingual TTS matter her
 3. The script engine writes scripts for each language and urgency level. Each script passes the fact lock or is replaced by a template.
 4. The voice layer renders the audio. Audio is cached by content hash, so a repeat never costs a second TTS call.
 5. The scheduler creates playback jobs for the target zones, using the repeat policy for that event type.
-6. Zone players in the browser play the chime, then each language in order.
+6. Zone players in the browser play each language's clip in order. The chime is already stitched into the front of the first-language clip (ARCHITECTURE D18), so a sequence has one chime and the player adds none.
 
 ### F2. Staff note → announcement (human confirms)
 1. The agent types a free-text note into the console.

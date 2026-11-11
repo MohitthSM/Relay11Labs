@@ -4,7 +4,7 @@ Relay is a context-aware PA system for transport hubs, built as a pitch demo for
 
 **Read before working:**
 - `SPEC.md` (what and why)
-- `ARCHITECTURE.md` (how, and the design decisions D1–D14)
+- `ARCHITECTURE.md` (how, and the design decisions D1–D18)
 - `PLAN.md` (which phase we are in)
 
 Do not contradict a decision in ARCHITECTURE.md silently. If a change needs one, update the doc in the same change and say so.
@@ -32,11 +32,11 @@ Do not contradict a decision in ARCHITECTURE.md silently. If a change needs one,
 ## Stack
 
 - **Backend:**
-  - Python 3.12, FastAPI, Pydantic v2, `pydantic-settings`
+  - Python 3.12 (pinned in `backend/.python-version`), FastAPI, Pydantic v2, `pydantic-settings`
   - SQLModel + SQLite
   - `anthropic` (Claude API) and `elevenlabs` (official SDK, pinned `>=2.77,<3`)
   - `mutagen` (audio duration), `pydub` (stitches clips; needs the `ffmpeg` binary for MP3; `audioop-lts` is its Python 3.13 shim), `httpx` (TfL), `pyyaml`
-- **Tooling:** `uv` for env and deps, `pytest`, `pytest-asyncio`, `ruff` (lint + format).
+- **Tooling:** `uv` for env and deps, `pytest`, `pytest-asyncio`, `ruff` (lint + format), `pyright` (types, on `relay/` and `scripts/`).
 - **Frontend:** React + Vite + TypeScript + Tailwind. No state library: `fetch` + `useState`/`useEffect`, and native `EventSource` for SSE.
 - **Models (via `.env`):**
   - `SCRIPT_MODEL_DEFAULT=claude-haiku-5-5`
@@ -56,7 +56,9 @@ relay/
 │   │   ├── main.py                # FastAPI app, lifespan starts scheduler + sources
 │   │   ├── config.py              # Settings (pydantic-settings), mock/live resolution
 │   │   ├── db.py                  # engine, session dependency, create_all
-│   │   ├── models.py              # SQLModel tables: Event, LLMCall, Announcement, AudioClip, PlaybackJob, PlayLog
+│   │   ├── models.py              # SQLModel tables: Event, LLMCall, Announcement, AudioClip, VoiceRender, PlaybackJob, PlayLog
+│   │   ├── context.py             # Context: providers + settings + engine, shared by routers and services
+│   │   ├── retry.py               # call_with_retry (TTS retries in voice.py, D14)
 │   │   ├── schemas.py             # Pydantic event payloads (discriminated union) + API DTOs
 │   │   ├── sites.py               # load/validate sites/*.yaml
 │   │   ├── events.py              # create / update / resolve; orchestrates script → voice → schedule
@@ -64,7 +66,7 @@ relay/
 │   │   ├── pronunciation.py       # PLS parsing, pronunciation.lock.json
 │   │   ├── pronsync.py            # create/update a site's dictionary (used by the script)
 │   │   ├── scheduler.py           # 1 s tick loop, zone busy tracking, escalation
-│   │   ├── bus.py                 # in-memory SSE fan-out
+│   │   ├── bus.py                 # in-memory fan-out (WebSocket state changes, SSE play commands)
 │   │   ├── timeutil.py            # now(), scaled(seconds) — the ONLY place RELAY_TIME_SCALE is read
 │   │   ├── prompts.py             # load versioned prompt files (backend/prompts/)
 │   │   ├── script/
@@ -90,7 +92,7 @@ relay/
 │   │   │   ├── replay.py          # plays scenarios/*.json on a (scaled) timeline
 │   │   │   └── tfl.py             # Phase 7: TfL line status poller
 │   │   └── api/
-│   │       ├── events.py  playback.py  metrics.py  scenarios.py
+│   │       ├── events.py  ws.py  playback.py  scenarios.py  metrics.py (Phase 6)
 │   ├── prompts/                   # <name>.v<N>.md: script_<hub>, script_rules, note_extract
 │   ├── sites/                     # tube_station.yaml, airport.yaml, bus_station.yaml, *.pls, pronunciation.lock.json
 │   ├── scenarios/                 # a_jubilee.json, b_ba117.json, c_route25.json
@@ -114,7 +116,7 @@ Run from the repo root.
 make setup        # cd backend && uv sync ; cd frontend && npm install
 make dev          # backend :8000 (uvicorn --reload) + frontend :5173 (vite, proxies /api)
 make test         # cd backend && uv run pytest -q
-make lint         # uv run ruff check . && uv run ruff format --check . && (cd frontend && npm run typecheck)
+make lint         # ruff check + format --check + pyright (backend), then npm run typecheck (frontend)
 make fmt          # uv run ruff format . && uv run ruff check --fix .
 make sync-pronunciations  # upload/update sites/*.pls to ElevenLabs (needs ELEVENLABS_API_KEY)
 make demo-a       # POST /scenarios/a_jubilee/run (same for demo-b, demo-c)
@@ -142,6 +144,7 @@ ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
 ELEVENLABS_MAX_CONCURRENCY=2
 ELEVENLABS_TIMEOUT_S=20
 AUDIO_DIR=data/audio
+VOICE_SPLIT_SEGMENTS=true        # false: voice each announcement whole (no fixed opening/closing)
 RELAY_TIME_SCALE=1              # 60 = one minute passes in one second
 RELAY_MOCK_HALLUCINATE=false    # mock LLM injects one false fact per event (demo)
 RELAY_PII_RETENTION_HOURS=24

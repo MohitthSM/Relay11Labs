@@ -6,7 +6,7 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 2: Scaffold and events
 
-> **Status:** the workflow framework core (ARCHITECTURE §10) was built first, with the scaffold pieces it needs: `pyproject.toml`, `Makefile`, `.env.example`, `config.py`, `db.py`, `timeutil.py`, `providers/`, `main.py` with `/health`. **Still open from this phase:** `models.py` Relay tables, `schemas.py`, `sites.py`, `events.py`, `api/events.py`, the frontend scaffold, and their tests.
+> **Status:** built in mock mode. Done: `models.py` (`Event`, `LLMCall`, `Announcement`, `PlaybackJob`, `PlayLog`, plus the voice tables), `events.py` (create, versioned update, resolve), `api/events.py` (`POST /events`, `PUT /events/{key}`, `POST /events/{id}/resolve`, `GET /events`, `GET /events/{id}`), `GET /health` per provider, the Vite/React/TS/Tailwind scaffold with a console listing events (announcement cards with audio players, scenario buttons and a speed selector). **Scope added by the Phase 2 brief:** the `/ws/events` WebSocket for state changes (amends D8), the mock scenario feed for A, B and C with speed control (`POST /scenarios/{name}/run`, `PUT /speed`; pulled forward from Phase 5), and the end-to-end wiring event -> script engine -> `voice.render_many`, so scenario B goes from `POST /events` to nine playable clips. **Not built:** a `Zone` table (zones are YAML config, D12; the brief's "Zone" table would contradict that), the event form (Phase 6). The workflow framework that was built first was removed as out of scope, with the chat and CRM providers (ARCHITECTURE §10 is gone).
 
 **Goal:** a running FastAPI app that stores versioned, validated events.
 
@@ -27,7 +27,7 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 3: Script engine
 
-> **Status:** built in mock mode. Done: `schemas.py` and `sites.py` (pulled forward from Phase 2), three site YAMLs, providers (`llm_mock`, `llm_anthropic`), templates, the fact lock (5 layers + format, required claims, urgency, filled-facts), lexicons in EN/ES/FR, prompt files per hub type (D15), `engine.py` returning a `ScriptPlan`, staff notes with `POST /events/from-note`, `normalize.py`, scenario JSONs. **Still open:** writing `LLMCall`/`Announcement` rows (needs `models.py` and `events.py` from Phase 2), the console announcement card (no frontend yet), and the `-m live` smoke run (no API key in the build environment; see ARCHITECTURE §9).
+> **Status:** built in mock mode. Done: `schemas.py` and `sites.py` (pulled forward from Phase 2), three site YAMLs, providers (`llm_mock`, `llm_anthropic`), templates, the fact lock (5 layers + format, required claims, urgency, filled-facts), lexicons in EN/ES/FR, prompt files per hub type (D15), `engine.py` returning a `ScriptPlan`, staff notes with `POST /events/from-note`, `normalize.py`, scenario JSONs. `LLMCall`/`Announcement` rows are now written by `events.py` (Phase 2), and the console shows an announcement card per slot. **Still open:** the `-m live` smoke run (no API key in the build environment; see ARCHITECTURE §9).
 
 **Goal:** events become fact-locked scripts in EN/ES/FR at each urgency level, with model routing logged.
 
@@ -54,7 +54,7 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 4: Voice layer
 
-> **Status:** built and tested in mock mode. Done: `tts_base`/`tts_mock`/`tts_elevenlabs` (`sync_dictionary` too), `build_tts`, `models.py` (`AudioClip`, `VoiceRender`), `voice.py` (routing D17, cache, segments and stitching D18, metrics, `stats()`), `pronunciation.py`, `pronsync.py`, `scripts/sync_pronunciations.py`, `static/chime.wav`, `GET /audio/{clip_id}`, tests. **Deviations from the list below:** the dictionary is created with `create_from_rules` (PLS parsed locally) and its id and version go to `sites/pronunciation.lock.json`, not into the site YAML, so YAML comments survive. The chime is WAV and is stitched into the first-language clip. The console play button is not built (no frontend yet). **Still open:** the `-m live` smoke test has never run (no key in the build environment); the default voice is a placeholder taken from the API docs and nobody has listened to it in EN/ES/FR; the `eleven_v4_turbo` vs `eleven_v4` comparison; the IPA in `sites/*.pls` is unverified by ear; `sync_pronunciations.py` has never run against the real API; wiring `voice.render_many` into the events service (Phase 2).
+> **Status:** built and tested in mock mode. Done: `tts_base`/`tts_mock`/`tts_elevenlabs` (`sync_dictionary` too), `build_tts`, `models.py` (`AudioClip`, `VoiceRender`), `voice.py` (routing D17, cache, segments and stitching D18, metrics, `stats()`), `pronunciation.py`, `pronsync.py`, `scripts/sync_pronunciations.py`, `static/chime.wav`, `GET /audio/{clip_id}`, tests. **Deviations from the list below:** the dictionary is created with `create_from_rules` (PLS parsed locally) and its id and version go to `sites/pronunciation.lock.json`, not into the site YAML, so YAML comments survive. The chime is WAV and is stitched into the first-language clip. **Still open:** the `-m live` smoke test has never run (no key in the build environment); the default voice is a placeholder taken from the API docs and nobody has listened to it in EN/ES/FR; the `eleven_v4_turbo` vs `eleven_v4` comparison; the IPA in `sites/*.pls` is unverified by ear; `sync_pronunciations.py` has never run against the real API; (`voice.render_many` is now called by `events.py`, and the console cards have a play button.)
 
 **Goal:** approved scripts become cached audio clips.
 
@@ -83,14 +83,14 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
   - 1 s tick
   - due-job query
   - per-zone `busy_until` and priority ordering
-  - sequence building: `[chime, lang1, lang2, …]`
+  - sequence building: `[lang1, lang2, …]`; the chime is already stitched into the first-language clip (D18, SPEC F1 step 6)
   - escalation (`urgency = min(plays_done + 1, 3)`)
   - `max_plays` and `ends_at`
   - cancellation on update or resolve
   - resolution messages
   - auto-resolve when `ends_at` passes
-- `bus.py` and `GET /playback/stream?zone=…` (SSE).
-- `sources/replay.py`, scenario JSONs, and `POST /scenarios/{name}/run`.
+- `GET /playback/stream?zone=…` (SSE) on top of `bus.py` (built in Phase 2 for `/ws/events`).
+- `sources/replay.py` and `POST /scenarios/{name}/run` already exist (Phase 2); here they start driving the scheduler.
 - Frontend Zones page: one panel per zone with an `EventSource`, a sequential `<audio>` queue, a now-playing caption, and the next play time.
 - **Tests (mock, `RELAY_TIME_SCALE=1000`):**
   - **A:** the severe message stops after the update, and the good-service message plays exactly 2×.

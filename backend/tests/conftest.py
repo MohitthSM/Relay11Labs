@@ -5,9 +5,8 @@ import os
 os.environ["RELAY_LIVE_ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY", "")
 os.environ["RELAY_LIVE_ELEVENLABS_API_KEY"] = os.environ.get("ELEVENLABS_API_KEY", "")
 os.environ.update(
-    RELAY_LLM_MODE="mock", RELAY_TTS_MODE="mock", RELAY_CHAT_MODE="mock", RELAY_CRM_MODE="mock",
-    RELAY_TIME_SCALE="1000", ANTHROPIC_API_KEY="", ELEVENLABS_API_KEY="", SLACK_BOT_TOKEN="",
-    SLACK_SIGNING_SECRET="", SALESFORCE_ACCESS_TOKEN="", RELAY_MOCK_HALLUCINATE="false",
+    RELAY_LLM_MODE="mock", RELAY_TTS_MODE="mock", RELAY_TIME_SCALE="1000",
+    ANTHROPIC_API_KEY="", ELEVENLABS_API_KEY="", RELAY_MOCK_HALLUCINATE="false",
 )  # fmt: skip
 
 import pytest  # noqa: E402
@@ -15,13 +14,6 @@ from sqlmodel import Session  # noqa: E402
 
 from relay.config import Settings  # noqa: E402
 from relay.db import init_db, make_engine  # noqa: E402
-from relay.providers import Connectors  # noqa: E402
-from relay.providers.chat_mock import MockChatProvider  # noqa: E402
-from relay.providers.crm_mock import MockSalesforceProvider  # noqa: E402
-from relay.providers.llm_mock import MockLLMProvider  # noqa: E402
-from relay.providers.tts_mock import MockTTSProvider  # noqa: E402
-from relay.workflow.context import Context  # noqa: E402
-from relay.workflow.definitions import WORKFLOWS  # noqa: E402
 
 
 @pytest.fixture
@@ -29,28 +21,13 @@ def db_url(tmp_path):
     return f"sqlite:///{tmp_path / 'test.db'}"
 
 
-@pytest.fixture
-def conns():
-    return Connectors(
-        llm=MockLLMProvider(), chat=MockChatProvider(), crm=MockSalesforceProvider(),
-        tts=MockTTSProvider(),
-    )  # fmt: skip
+@pytest.fixture(autouse=True)
+def reset_time_scale():
+    from relay import timeutil
 
-
-@pytest.fixture
-def make_ctx(conns):
-    """Build a Context sharing the same connectors: lets a test simulate a restart."""
-
-    def build() -> Context:
-        settings = Settings(connector_max_attempts=3, connector_base_delay_s=0.5)
-        return Context(conns=conns, settings=settings, workflows=WORKFLOWS)
-
-    return build
-
-
-@pytest.fixture
-def ctx(make_ctx):
-    return make_ctx()
+    timeutil.set_scale(None)
+    yield
+    timeutil.set_scale(None)
 
 
 @pytest.fixture
@@ -67,5 +44,21 @@ def session(engine):
 
 
 @pytest.fixture
-def settings():
-    return Settings()
+def settings(tmp_path, db_url):
+    """Mock-mode settings with a temp database and audio directory."""
+    return Settings(relay_db_url=db_url, audio_dir=str(tmp_path / "audio"))
+
+
+@pytest.fixture
+def app(settings):
+    from relay.main import create_app
+
+    return create_app(settings)
+
+
+@pytest.fixture
+def client(app):
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as c:  # the context manager runs the lifespan (creates tables)
+        yield c

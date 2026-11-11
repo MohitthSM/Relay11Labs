@@ -107,7 +107,7 @@ Each scenario ships as a replay file in `backend/scenarios/` that posts timed ev
   2. Level 2, firmer: "…Passenger John Smith, your flight is ready to depart. Please make your way to Gate 23 now."
   3. Level 3, last call: "…This is the last call for passenger John Smith on flight BA117 to New York. Gate 23 is about to close."
 
-  All 9 clips (3 levels × 3 languages) are rendered when the event is received. Playback never waits on generation.
+  All 9 scripts are written when the event is received. Level 1 is voiced in every language before the first play; levels 2 and 3 are voiced in the background, before their plays fall due. The first play never waits on them, and if a level is late, the previous level replays and the system logs it (ARCHITECTURE D4).
 - **Zones:** Gate 23, Concourse B.
 - **Stop:** after 3 plays, or when the agent clicks **Passenger boarded** (resolve). There is no resolution message.
 - **Fact-lock moment:** with the mock "hallucinate" toggle on, the mock LLM writes "Gate 32" or invents "your bags will be offloaded". The console shows the rejection reasons, and the template version plays instead.

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from relay import background
 from relay.config import Settings
 from relay.main import create_app
 from relay.providers.tts_elevenlabs import ElevenLabsProvider
@@ -37,6 +38,8 @@ def test_scenario_b_plays_from_the_committed_samples(tmp_path, monkeypatch):
     payload = json.loads((SCENARIOS / "b_ba117.json").read_text())["events"][0]["payload"]
     with TestClient(create_app(settings)) as client:
         event = client.post("/events", json={"site_id": "airport", "payload": payload}).json()
+        assert background.wait(10)  # levels 2 and 3 come from the cache too
+        event = client.get(f"/events/{event['id']}").json()
         summary = client.get("/metrics/summary").json()
     assert calls == []
     assert len(event["announcements"]) == 9

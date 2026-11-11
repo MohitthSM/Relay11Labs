@@ -62,6 +62,7 @@ relay/
 │   │   ├── schemas.py             # Pydantic event payloads (discriminated union) + API DTOs
 │   │   ├── sites.py               # load/validate sites/*.yaml
 │   │   ├── events.py              # create / update / resolve / approve, dedup; orchestrates script → voice → jobs
+│   │   ├── background.py          # one worker thread: later urgency levels are voiced after first play (D4)
 │   │   ├── jobs.py                # playback jobs per event version: approval rule, hold, release, cancel
 │   │   ├── voice.py               # model routing, content-hash cache, segments + stitching, metrics
 │   │   ├── pronunciation.py       # PLS parsing, pronunciation.lock.json
@@ -176,7 +177,7 @@ Voice ids and pronunciation dictionary locators are set per site in `sites/*.yam
 - Pure core, thin edges:
   - `factlock.py`, `templates.py`, `normalize.py` and scheduler decision logic do no I/O and take explicit arguments (lexicon and prompt files are read once and cached).
   - Time comes in as a parameter (`now: datetime`), never from `datetime.now()` inside logic.
-- Sync SQLModel sessions inside FastAPI's threadpool are fine. Only `scheduler.run`, `bus.py`, the replay runner and the WebSocket endpoint are `async`; the scheduler tick (`scheduler.step`) is sync and takes `now`, so tests drive it with a fake clock. Blocking provider calls are run with `asyncio.to_thread`.
+- Sync SQLModel sessions inside FastAPI's threadpool are fine. Later urgency levels are voiced on `background.py`'s one worker thread, which opens its own session; tests call `background.wait()` before they look at those clips. Only `scheduler.run`, `bus.py`, the replay runner and the WebSocket endpoint are `async`; the scheduler tick (`scheduler.step`) is sync and takes `now`, so tests drive it with a fake clock. Blocking provider calls are run with `asyncio.to_thread`.
 - All intervals go through `timeutil.scaled()`. Never `asyncio.sleep(<literal>)` outside `timeutil`.
 - Each event payload field that is a fact is declared in `schemas.py` with `Field(json_schema_extra={"fact": True})`. The fact lock and the prompt read that metadata, so the fact list has a single source.
 - Errors: providers raise `ProviderError`, and the engine catches it and falls back. API handlers return 4xx for validation errors and never 500 for a provider failure.

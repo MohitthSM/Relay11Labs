@@ -5,8 +5,8 @@ from datetime import timedelta
 import pytest
 from sqlmodel import Session, select
 
+from relay import background, purge, timeutil
 from relay import events as events_service
-from relay import purge, timeutil
 from relay.context import Context
 from relay.models import Announcement, AudioClip, Event, LLMCall, VoiceRender
 from relay.providers import build_connectors
@@ -50,7 +50,8 @@ def everything(engine) -> str:
 def test_a_resolved_page_is_purged_after_the_retention(ctx, engine, settings):
     event = page(ctx, engine)
     with Session(engine) as s:
-        clips = [s.get(AudioClip, a.clip_id) for a in s.exec(select(Announcement)).all()]
+        anns = s.exec(select(Announcement)).all()  # resolved at once: only level 1 was voiced
+        clips = [s.get(AudioClip, a.clip_id) for a in anns if a.clip_id]
         files = [clip_path(settings, c) for c in clips if c]
     assert files and all(f.exists() for f in files)
     resolved_at = event.resolved_at
@@ -99,6 +100,7 @@ def test_a_clip_shared_with_a_running_page_is_kept(ctx, engine, settings):
         running = events_service.create(
             s, ctx, site_id="airport", payload=PAGE, event_key="same-passenger-again"
         )
+        assert background.wait(10)  # its levels 2 and 3 are voiced in the background
         rows = s.exec(select(Announcement).where(Announcement.event_id == running.id)).all()
         live_ids = [a.clip_id for a in rows]
     purge.purge_due(ctx, timeutil.now() + DAY)

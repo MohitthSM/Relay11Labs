@@ -168,7 +168,7 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 > 6. **Voice: George (`JBFqnCBsd6RMkjVDRZzb`, premade), approved by the owner** after listening.
 >
 > **Open findings from live:**
-> - A cold scenario B takes about 14 s to its first play (9 renders, 2 at a time), against the 8 s target. See ARCHITECTURE §7.
+> - ~~A cold scenario B takes about 14 s to its first play (9 renders, 2 at a time), against the 8 s target.~~ **Fixed before merge:** D4 is amended so that only level 1 is voiced before the first play, and levels 2 and 3 are voiced in the background. If a level is late, the previous one replays and the scheduler logs it. The estimated cold first play is now 5 to 7 s (ARCHITECTURE §7, estimated from the measured clips, no new renders). Tests: `tests/test_first_play.py`.
 > - The key has no `user_read` permission, so the account's real credit usage is not visible; usage is counted from the characters sent.
 
 > **Not done from the list below:** `audio_effects`, chime loudness matching, `passenger_name_ipa`, v4 audio tags for level 3, and `speechSynthesis` in mock mode. All of them need listening with live audio, except the last, which was left out to keep mock mode deterministic. The ffmpeg layer of the backend image could not be built in the build environment (`deb.debian.org` is blocked there); it is a standard Debian package.

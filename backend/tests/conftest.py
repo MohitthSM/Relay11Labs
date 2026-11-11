@@ -26,6 +26,16 @@ def db_url(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def drain_background():
+    """Later urgency levels are voiced on a background thread (events.voice_later): finish one
+    test's work before the next test starts, so it never lands in another test's database."""
+    yield
+    from relay import background
+
+    assert background.wait(30), "background work did not finish"
+
+
+@pytest.fixture(autouse=True)
 def reset_time_scale():
     from relay import timeutil
 

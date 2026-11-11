@@ -245,7 +245,8 @@ export type StateMessage =
   | ({ type: "source" } & Omit<SourceStatus, "flights">)
   | { type: "snapshot"; active: { event_id: number; site_id: string; event_type: string; version: number }[] }
   | {
-      type: "event.created" | "event.updated" | "event.resolved" | "event.approved";
+      // event.audio: the later urgency levels have been voiced in the background
+      type: "event.created" | "event.updated" | "event.resolved" | "event.approved" | "event.withdrawn" | "event.audio";
       event_id: number;
       site_id: string;
       event_type: string;

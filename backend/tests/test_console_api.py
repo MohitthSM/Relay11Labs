@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from relay import background
 from relay.api.metrics import percentile
 from tests.test_scenarios import run_scenario, wait_for
 
@@ -41,6 +42,7 @@ def test_metrics_are_empty_and_sane_on_a_fresh_database(client):
 
 def test_metrics_after_scenario_b(client):
     assert run_scenario(client, "b_ba117")["state"] == "done"
+    assert background.wait(10)  # levels 2 and 3 are voiced after the event is created
     s = client.get("/metrics/summary").json()
     assert s["announcements"]["total"] == 9
     assert s["announcements"]["llm"] == 9  # the mock LLM writes the reference wording

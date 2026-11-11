@@ -2,7 +2,8 @@
 
 On connect the client gets a snapshot of the active events, then one small message per change:
   event.created | event.updated | event.resolved | event.approved | event.withdrawn
-                                                     (console state changes)
+  event.audio                                        (console state changes; event.audio: the
+                                                     later urgency levels are now voiced)
   play                                               (scheduler: one clip in one zone)
   source                                             (data source: demo/live, TfL feed status)
 Ids, urls and state only, never names: the client re-fetches details (captions included) over HTTP.

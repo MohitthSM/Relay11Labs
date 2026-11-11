@@ -1,133 +1,145 @@
-import { useCallback, useEffect, useState } from "react";
-import { approveEvent, getEvent, listEvents, listScenarios, resolveEvent, runScenario, watchEvents } from "../api";
-import AnnouncementCard from "../components/AnnouncementCard";
-import type { RelayEvent, ScenarioInfo } from "../types";
+import EventCard from "../components/EventCard";
+import { Led, Panel, Tag } from "../components/ui";
+import { countdown, detail, headline } from "../format";
+import { byUrgency, standing } from "../status";
+import type { EventsData } from "../data";
+import type { RelayEvent, Site, Zone } from "../types";
+import type { Activity } from "../zoneAudio";
 
-const SPEEDS = [1, 10, 60, 600];
+type Props = {
+  events: EventsData;
+  sites: Site[];
+  zones: Zone[];
+  activity: Record<string, Activity>;
+  now: number;
+  onApprove: (e: RelayEvent) => void;
+  onEdit: (e: RelayEvent) => void;
+  onStop: (e: RelayEvent) => void;
+  onNew: () => void;
+};
 
-function describe(e: RelayEvent): string {
-  const p = e.payload as Record<string, string | undefined>;
-  if (e.type === "line_status") return `${p.line} line: ${p.status?.replace("_", " ")}`;
-  if (e.type === "passenger_page") return `Page for ${p.passenger_name}, ${p.flight_number}, gate ${p.gate}`;
-  return `Route ${p.route}: stand ${p.from_stand} to ${p.to_stand}`;
-}
-
-export default function Console({ operator }: { operator: string }) {
-  const [events, setEvents] = useState<RelayEvent[]>([]);
-  const [open, setOpen] = useState<RelayEvent | null>(null);
-  const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
-  const [speed, setSpeed] = useState(60);
-  const [autoApprove, setAutoApprove] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    listEvents().then(setEvents).catch((e: Error) => setError(e.message));
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    listScenarios().then((s) => setScenarios(s.scenarios)).catch((e: Error) => setError(e.message));
-    return watchEvents((m) => {
-      if (m.type.startsWith("event.")) refresh(); // a state change: re-fetch the list
-    });
-  }, [refresh]);
-
-  const show = (id: number) => getEvent(id).then(setOpen).catch((e: Error) => setError(e.message));
+// The live board: every active event with its status, next play, scripts and the three actions,
+// and a strip showing what each zone is doing right now.
+export default function Console({ events, sites, zones, activity, now, onApprove, onEdit, onStop, onNew }: Props) {
+  const rows = events.active
+    .map((e) => ({ e, s: standing(e, zones, activity) }))
+    .sort(byUrgency);
+  const waiting = rows.filter((r) => r.s.status === "pending").length;
 
   return (
-    <main className="space-y-4">
-      {error && <p className="rounded bg-red-100 p-2 text-sm text-red-800">{error}</p>}
+    <main className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="space-y-4">
+        {events.error && (
+          <p className="rounded-sm border border-alert/50 bg-alert/10 p-2 font-mono text-xs text-alert">{events.error}</p>
+        )}
+        <Panel
+          title={`Live board · ${rows.length} active`}
+          right={waiting > 0 ? <Tag tone="alert">{waiting} awaiting approval</Tag> : <Tag tone="ok">clear</Tag>}
+        >
+          {rows.length === 0 ? (
+            <div className="py-10 text-center">
+              <p className="font-mono text-xs uppercase tracking-[0.2em] text-dim">No active announcements</p>
+              <p className="mt-2 text-sm text-dim">
+                Run a scenario above, or{" "}
+                <button className="text-phosphor underline-offset-2 hover:underline" onClick={onNew}>
+                  write a new announcement
+                </button>
+                .
+              </p>
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {rows.map(({ e, s }) => (
+                <EventCard
+                  key={e.id}
+                  event={e}
+                  standing={s}
+                  site={sites.find((x) => x.id === e.site_id)}
+                  now={now}
+                  onApprove={() => onApprove(e)}
+                  onEdit={() => onEdit(e)}
+                  onStop={() => onStop(e)}
+                />
+              ))}
+            </ul>
+          )}
+        </Panel>
 
-      <section className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium">Run scenario</span>
-        {scenarios.map((s) => (
-          <button
-            key={s.name}
-            title={s.description}
-            className="rounded bg-slate-800 px-3 py-1 text-white hover:bg-slate-700"
-            onClick={() => runScenario(s.name, speed, autoApprove).catch((e: Error) => setError(e.message))}
-          >
-            {s.name}
-          </button>
-        ))}
-        <label className="ml-2">
-          speed{" "}
-          <select className="rounded border p-1" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
-            {SPEEDS.map((s) => (
-              <option key={s} value={s}>
-                {s}x
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="ml-2" title="Approve held events as 'scenario runner' (audit log shows it)">
-          <input type="checkbox" checked={autoApprove} onChange={(e) => setAutoApprove(e.target.checked)} /> auto-approve
-        </label>
-      </section>
+        {events.recent.length > 0 && (
+          <Panel title="Recently resolved">
+            <ul className="divide-y divide-ink-600 text-sm">
+              {events.recent.map((e) => (
+                <li key={e.id} className="flex items-center justify-between gap-2 py-1.5">
+                  <span className="min-w-0 truncate capitalize text-slate-400">
+                    <span className="mr-2 font-mono text-[10px] text-dim">#{e.id}</span>
+                    {headline(e)} <span className="text-dim">{detail(e)}</span>
+                  </span>
+                  <Tag tone="ok">resolved</Tag>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
+      </div>
 
-      <section>
-        <h2 className="mb-2 font-medium">Events</h2>
-        {events.length === 0 && <p className="text-sm text-slate-500">No events yet. Run a scenario.</p>}
-        <ul className="space-y-1">
-          {events.map((e) => (
-            <li key={e.id} className="flex items-center justify-between rounded border bg-white p-2 text-sm">
-              <button className="text-left hover:underline" onClick={() => show(e.id)}>
-                <span className="font-mono text-xs text-slate-500">#{e.id} v{e.version}</span> {describe(e)}
-              </button>
-              <span className="flex items-center gap-2">
-                <span
-                  className={`rounded px-2 text-xs ${
-                    e.state === "active" ? "bg-green-100" : e.state === "resolved" ? "bg-slate-200" : "bg-amber-100"
-                  }`}
-                >
-                  {e.state}
-                </span>
-                {e.state === "active" && e.approval === "pending" && (
-                  <>
-                    <span className="rounded bg-red-100 px-2 text-xs" title={e.approval_reason ?? ""}>
-                      awaiting approval: {e.approval_reason}
-                    </span>
-                    <button
-                      className="rounded bg-red-700 px-2 text-xs text-white hover:bg-red-600"
-                      onClick={() =>
-                        approveEvent(e.id, operator)
-                          .then(refresh)
-                          .catch((x: Error) => setError(x.message))
-                      }
-                    >
-                      Approve
-                    </button>
-                  </>
-                )}
-                {e.approved_by && e.approved_by !== "auto" && (
-                  <span className="text-xs text-slate-500">approved by {e.approved_by}</span>
-                )}
-                {e.state === "active" && (
-                  <button
-                    className="rounded border px-2 text-xs hover:bg-slate-100"
-                    onClick={() => resolveEvent(e.id).then(refresh).catch((x: Error) => setError(x.message))}
-                  >
-                    Resolve
-                  </button>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {open && (
-        <section>
-          <h2 className="mb-2 font-medium">
-            Event #{open.id}: {open.announcements.length} announcements
-          </h2>
-          <ul className="grid gap-2 md:grid-cols-2">
-            {open.announcements.map((a) => (
-              <AnnouncementCard key={a.id} a={a} />
-            ))}
-          </ul>
-        </section>
-      )}
+      <ZoneStrip sites={sites} zones={zones} activity={activity} now={now} />
     </main>
+  );
+}
+
+/** Playing now / next, per zone. */
+function ZoneStrip({
+  sites,
+  zones,
+  activity,
+  now,
+}: {
+  sites: Site[];
+  zones: Zone[];
+  activity: Record<string, Activity>;
+  now: number;
+}) {
+  return (
+    <Panel title="Zones" className="self-start lg:sticky lg:top-[132px]">
+      <div className="space-y-3">
+        {sites.map((site) => (
+          <div key={site.id}>
+            <h3 className="mb-1 font-mono text-[10px] uppercase tracking-[0.16em] text-dim">{site.name}</h3>
+            <ul className="space-y-1">
+              {zones
+                .filter((z) => z.site_id === site.id)
+                .map((z) => {
+                  const a = activity[z.zone_id];
+                  const onAir = a?.cmd ?? z.on_air;
+                  return (
+                    <li
+                      key={z.zone_id}
+                      data-testid={`strip-${z.zone_id}`}
+                      data-lit={Boolean(onAir)}
+                      className={`flex items-center justify-between gap-2 rounded-sm border px-2 py-1 text-xs ${
+                        onAir ? "border-phosphor/60 bg-phosphor/10 text-phosphor" : "border-ink-600 text-slate-400"
+                      }`}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Led tone={onAir ? "phosphor" : "dim"} pulse={Boolean(onAir)} />
+                        <span className="truncate">{z.name}</span>
+                      </span>
+                      <span className="shrink-0 font-mono text-[10px] uppercase">
+                        {onAir
+                          ? `#${onAir.event_id} ${(a?.cmd.language ?? z.on_air?.language ?? "").toUpperCase()}`
+                          : z.held > 0
+                            ? `${z.held} held`
+                            : z.next
+                              ? `next ${countdown(z.next.at, now)}`
+                              : "idle"}
+                      </span>
+                    </li>
+                  );
+                })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }

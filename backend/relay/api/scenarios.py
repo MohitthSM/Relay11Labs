@@ -5,6 +5,8 @@ POST /scenarios/{name}/run?speed=60&auto_approve=true   start a scenario in the 
 GET  /scenarios                       the scenarios and the current speed
 GET  /scenarios/runs/{run_id}         progress of a run
 GET/PUT /speed                        time scale: 60 means one minute passes in one second
+PUT  /demo/hallucinate                mock LLM only: inject one false fact per event (the fact-lock
+                                      demo, RELAY_MOCK_HALLUCINATE at runtime)
 """
 
 import asyncio
@@ -15,11 +17,16 @@ from pydantic import BaseModel, Field
 
 from relay import timeutil
 from relay.context import Context
+from relay.providers.llm_mock import MockLLMProvider
 from relay.sources import replay
 
 
 class SpeedBody(BaseModel):
     scale: float = Field(gt=0, le=10000)
+
+
+class HallucinateBody(BaseModel):
+    enabled: bool
 
 
 def build_router(ctx: Context) -> APIRouter:
@@ -70,5 +77,13 @@ def build_router(ctx: Context) -> APIRouter:
     def set_speed(body: SpeedBody) -> dict:
         timeutil.set_scale(body.scale)
         return {"scale": timeutil.get_scale()}
+
+    @router.put("/demo/hallucinate")
+    def set_hallucinate(body: HallucinateBody) -> dict:
+        llm = ctx.conns.llm
+        if not isinstance(llm, MockLLMProvider):
+            raise HTTPException(409, "only the mock LLM can be told to hallucinate")
+        llm.hallucinate = body.enabled
+        return {"hallucinate": llm.hallucinate}
 
     return router

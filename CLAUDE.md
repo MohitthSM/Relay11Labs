@@ -93,7 +93,7 @@ relay/
 │   │   │   ├── replay.py          # plays scenarios/*.json on a (scaled) timeline
 │   │   │   └── tfl.py             # Phase 7: TfL line status poller
 │   │   └── api/
-│   │       ├── events.py  ws.py  playback.py  scenarios.py  metrics.py (Phase 6)
+│   │       ├── events.py  ws.py  playback.py  scenarios.py  metrics.py  sites.py
 │   ├── prompts/                   # <name>.v<N>.md: script_<hub>, script_rules, note_extract
 │   ├── sites/                     # tube_station.yaml, airport.yaml, bus_station.yaml, *.pls, pronunciation.lock.json
 │   ├── scenarios/                 # a_jubilee.json, b_ba117.json, c_route25.json
@@ -102,11 +102,15 @@ relay/
 │   ├── tests/                     # mirrors relay/; test_factlock.py is the biggest file
 │   └── data/                      # git-ignored: relay.db, audio/
 └── frontend/
-    ├── package.json  vite.config.ts  tailwind config
+    ├── package.json  vite.config.ts  tailwind.config.js
     └── src/
-        ├── main.tsx  App.tsx  api.ts  types.ts
+        ├── main.tsx  App.tsx          # header, toolbar, the one WebSocket, browser playback
+        ├── api.ts  types.ts           # typed fetch helpers; the socket with reconnect
+        ├── live.ts  data.ts           # useLive (shared socket), useEvents, useZones, useNow
+        ├── zoneAudio.ts  status.ts  format.ts   # one <audio> per zone; event standing; display helpers
         ├── pages/Console.tsx  Zones.tsx  Metrics.tsx
-        └── components/EventForm.tsx  StaffNote.tsx  AnnouncementCard.tsx  ZonePlayer.tsx
+        └── components/EventCard.tsx  ZoneMap.tsx  Compose.tsx  EventForm.tsx  StaffNote.tsx
+                       ScriptPreview.tsx  ui.tsx
 ```
 
 ## Commands

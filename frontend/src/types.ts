@@ -7,6 +7,127 @@ export type Health = {
   tts: "live" | "mock";
   llm_requested: string;
   tts_requested: string;
+  hallucinate: boolean | null; // null when the LLM is live: the toggle exists for the mock only
+};
+
+export type EventType = "line_status" | "passenger_page" | "stand_change";
+
+// GET /sites
+export type Site = {
+  id: string;
+  name: string;
+  hub_type: string;
+  languages: string[];
+  zones: { id: string; name: string; languages: string[] }[];
+  policies: {
+    event_type: EventType;
+    zones: string[];
+    interval_s: number;
+    max_plays: number | null;
+    duration_s: number | null;
+    escalate: boolean;
+    priority: string;
+    approval: string;
+  }[];
+  lines: string[];
+  stations: string[];
+  cities: string[];
+};
+
+export type Violation = { layer: string; code: string; detail: string; span: string };
+export type Rejection = { attempt: number; model: string; violations: Violation[] };
+
+// One script slot as the engine returns it (POST /events/preview)
+export type ScriptSlot = {
+  language: string;
+  urgency: number;
+  draft: string;
+  text: string;
+  spoken_text: string;
+  source: "llm" | "template";
+  model: string | null;
+  facts_used: string[];
+  rejections: Rejection[];
+};
+
+export type Preview = {
+  event_key: string;
+  action: "create" | "update" | "duplicate";
+  active_event_id: number | null;
+  needs_approval: string | null;
+  scripts: ScriptSlot[];
+};
+
+// POST /events/from-note
+export type NoteDraft = {
+  status: "ready" | "incomplete" | "rejected";
+  detail: string;
+  event_type: EventType | null;
+  payload: Record<string, unknown> | null;
+  fields: Record<string, unknown>;
+  dropped: Record<string, string>;
+  missing: string[];
+  source: "llm" | "rules" | "none";
+};
+export type NoteDraftOut = { draft: NoteDraft; preview: ScriptSlot | null };
+
+// GET /metrics/summary and /metrics/announcements
+export type Metrics = {
+  events: number;
+  active_events: number;
+  plays: number;
+  announcements: {
+    total: number;
+    llm: number;
+    template: number;
+    rejected: number;
+    rejection_rate: number;
+    template_rate: number;
+    by_layer: Record<string, number>;
+  };
+  llm_routes: {
+    model: string;
+    role: "default" | "escalation" | "other";
+    calls: number;
+    accepted: number;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+  }[];
+  llm_calls: number;
+  llm_escalation_share: number;
+  llm_cost_usd: number;
+  tts_renders: number;
+  tts_cache_hit_rate: number;
+  tts_segment_hit_rate: number;
+  tts_characters_billed: number;
+  tts_characters_saved: number;
+  tts_cost_usd: number;
+  tts_cost_saved_usd: number;
+  tts_models: { model: string; role: "live" | "scheduled" | "other"; renders: number; characters_billed: number; cost_usd: number }[];
+  total_cost_usd: number;
+  time_to_first_play: { n: number; p50_s: number | null; p95_s: number | null };
+  avg_tts_ttfa_ms: number;
+};
+
+export type MetricRow = {
+  id: number;
+  event_id: number;
+  event_type: EventType;
+  site_id: string;
+  version: number;
+  language: string;
+  urgency: number;
+  is_resolution: boolean;
+  source: "llm" | "template";
+  model: string | null;
+  rejection_layers: string[];
+  tts_model: string | null;
+  cache_hit: boolean | null;
+  characters_billed: number | null;
+  characters_saved: number | null;
+  tts_cost_usd: number | null;
+  ttfa_ms: number | null;
 };
 
 export type Announcement = {
@@ -18,7 +139,7 @@ export type Announcement = {
   spoken_text: string;
   source: "llm" | "template";
   model: string | null;
-  rejections: { attempt: number; model: string; violations: { layer: string; code: string; detail: string }[] }[];
+  rejections: Rejection[];
   clip_id: string | null;
   audio_url: string | null;
   duration_s: number | null;
@@ -31,7 +152,7 @@ export type RelayEvent = {
   id: number;
   event_key: string;
   site_id: string;
-  type: "line_status" | "passenger_page" | "stand_change";
+  type: EventType;
   version: number;
   state: EventState;
   priority: number;

@@ -1,3 +1,21 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* A faint grid behind everything, like a console desk. The rest is utility classes. */
+@layer base {
+  body {
+    background-image: linear-gradient(rgba(76, 195, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(76, 195, 255, 0.025) 1px, transparent 1px);
+    background-size: 32px 32px;
+    min-height: 100vh;
+  }
+  ::selection {
+    background: rgba(255, 176, 32, 0.35);
+  }
+  select,
+  input,
+  textarea {
+    color-scheme: dark;
+  }
+}

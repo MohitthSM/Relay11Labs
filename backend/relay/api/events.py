@@ -5,8 +5,12 @@ POST /events            create version 1 (409 if an active event has the key; 20
 PUT  /events/{key}      a new version of the active event (the same facts again: duplicate=true)
 POST /events/{id}/resolve
 POST /events/{id}/approve   an operator releases an event that waits for approval (D20)
-GET  /events, GET /events/{id}   (the detail has announcements and audio urls)
+GET  /events, GET /events/{id}   (the detail has announcements and audio urls; the list takes
+                        ?detail=true to include them)
 POST /events/from-note  a DRAFT for the agent to confirm (SPEC F2). Creates nothing, plays nothing.
+POST /events/preview    the scripts and fact-lock result for a payload, and what submitting it
+                        would do (create, update, duplicate; waits for approval or not). Creates
+                        nothing, plays nothing, writes no rows.
 
 A provider failure never gives a 500: scripts fall back to templates and a failed clip shows as
 `audio_error` on its announcement.
@@ -20,7 +24,7 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import Session, col, select
 
 from relay import events as events_service
-from relay import timeutil
+from relay import jobs, timeutil
 from relay.context import Context
 from relay.events import EventError
 from relay.models import Announcement, AudioClip, Event
@@ -38,6 +42,22 @@ class NoteIn(BaseModel):
 class NoteDraftOut(BaseModel):
     draft: NoteDraft
     preview: ScriptSlot | None = None  # first-language, urgency-1 script, when the draft is ready
+
+
+class PreviewIn(BaseModel):
+    site_id: str
+    payload: dict[str, Any]
+    source: Literal["form", "staff_note", "api"] = "form"
+
+
+class PreviewOut(BaseModel):
+    """What the operator sees before broadcasting: every script with its fact-check result."""
+
+    event_key: str
+    action: Literal["create", "update", "duplicate"]
+    active_event_id: int | None  # the event this would update (or already is)
+    needs_approval: str | None  # why an operator must approve it first, or None: plays at once
+    scripts: list[ScriptSlot]  # each has source (llm | template) and its fact-lock rejections
 
 
 class EventIn(BaseModel):
@@ -190,6 +210,7 @@ def build_router(ctx: Context) -> APIRouter:
         state: Literal["active", "superseded", "resolved"] | None = None,
         site_id: str | None = None,
         limit: int = Query(100, ge=1, le=500),
+        detail: bool = False,
     ) -> list[EventOut]:
         with Session(ctx.engine) as session:
             query = select(Event).order_by(col(Event.id).desc()).limit(limit)
@@ -197,7 +218,7 @@ def build_router(ctx: Context) -> APIRouter:
                 query = query.where(Event.state == state)
             if site_id:
                 query = query.where(Event.site_id == site_id)
-            return [event_out(session, e) for e in session.exec(query).all()]
+            return [event_out(session, e, detail=detail) for e in session.exec(query).all()]
 
     @router.get("/events/{event_id}")
     def get_event(event_id: int) -> EventOut:
@@ -224,5 +245,41 @@ def build_router(ctx: Context) -> APIRouter:
         context.languages = context.languages[:1]
         plan = generate(event, context, ctx.conns.llm, ctx.settings, now=timeutil.now())
         return NoteDraftOut(draft=draft, preview=plan.scripts[0])
+
+    @router.post("/events/preview")
+    def preview(body: PreviewIn) -> PreviewOut:
+        try:
+            probe = EventInput(event_key="draft", site_id=body.site_id, payload=body.payload)  # type: ignore[arg-type]
+            site = events_service.get_site_for(body.site_id, probe.type)
+        except (ValidationError, EventError) as exc:
+            raise _refuse(exc) from exc
+        key = events_service.derive_key(probe.payload)
+        with Session(ctx.engine) as session:
+            duplicate = events_service.find_duplicate(session, body.site_id, body.payload)
+            active = duplicate or events_service.active_event(session, key)
+            active_key, active_id = (active.event_key, active.id) if active else (key, None)
+            previous = events_service.previous_drafts(session, active) if active else []
+        reason = jobs.approval_reason(
+            site.policies[probe.type].approval,
+            source=body.source,
+            event_type=probe.type,
+            payload=probe.payload.model_dump(),
+        )
+        plan = generate(
+            probe.model_copy(update={"event_key": active_key}),
+            build_context(
+                site, probe.type, previous=previous
+            ),  # an update says "this is an update"
+            ctx.conns.llm,
+            ctx.settings,
+            now=timeutil.now(),
+        )
+        return PreviewOut(
+            event_key=active_key,
+            action="duplicate" if duplicate else "update" if active else "create",
+            active_event_id=active_id,
+            needs_approval=reason,
+            scripts=plan.scripts,
+        )
 
     return router

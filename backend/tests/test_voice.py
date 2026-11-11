@@ -539,11 +539,15 @@ def test_audio_endpoint_serves_clips(engine, tts, vsettings, session):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    from relay import scheduler
     from relay.api.playback import build_router
+    from relay.context import Context
+    from relay.providers import build_connectors
 
     out = voice.render(session, tts, vsettings, get_site("airport"), Item("Hello there all.", "en"))
     app = FastAPI()
-    app.include_router(build_router(engine, vsettings))
+    ctx = Context(conns=build_connectors(vsettings), settings=vsettings, engine=engine)
+    app.include_router(build_router(ctx, scheduler.State()))
     client = TestClient(app)
     ok = client.get(f"/audio/{out.clip_id}")
     assert ok.status_code == 200 and ok.headers["content-type"] == "audio/wav"

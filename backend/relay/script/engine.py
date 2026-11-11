@@ -216,7 +216,7 @@ def generate(
         event_type=event.type,
         version=event.version,
         scripts=scripts,
-        priority=policy.priority,
+        priority=policy.rank,
         repeat_interval_s=policy.interval_s,
         max_plays=policy.max_plays,
         expires_at=now + timedelta(seconds=policy.duration_s) if policy.duration_s else None,

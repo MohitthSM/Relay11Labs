@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getEvent, listEvents, listScenarios, resolveEvent, runScenario, watchEvents } from "../api";
+import { approveEvent, getEvent, listEvents, listScenarios, resolveEvent, runScenario, watchEvents } from "../api";
 import AnnouncementCard from "../components/AnnouncementCard";
 import type { RelayEvent, ScenarioInfo } from "../types";
 
@@ -12,11 +12,12 @@ function describe(e: RelayEvent): string {
   return `Route ${p.route}: stand ${p.from_stand} to ${p.to_stand}`;
 }
 
-export default function Console() {
+export default function Console({ operator }: { operator: string }) {
   const [events, setEvents] = useState<RelayEvent[]>([]);
   const [open, setOpen] = useState<RelayEvent | null>(null);
   const [scenarios, setScenarios] = useState<ScenarioInfo[]>([]);
   const [speed, setSpeed] = useState(60);
+  const [autoApprove, setAutoApprove] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -26,7 +27,9 @@ export default function Console() {
   useEffect(() => {
     refresh();
     listScenarios().then((s) => setScenarios(s.scenarios)).catch((e: Error) => setError(e.message));
-    return watchEvents(() => refresh()); // any state change: re-fetch the list
+    return watchEvents((m) => {
+      if (m.type.startsWith("event.")) refresh(); // a state change: re-fetch the list
+    });
   }, [refresh]);
 
   const show = (id: number) => getEvent(id).then(setOpen).catch((e: Error) => setError(e.message));
@@ -42,7 +45,7 @@ export default function Console() {
             key={s.name}
             title={s.description}
             className="rounded bg-slate-800 px-3 py-1 text-white hover:bg-slate-700"
-            onClick={() => runScenario(s.name, speed).catch((e: Error) => setError(e.message))}
+            onClick={() => runScenario(s.name, speed, autoApprove).catch((e: Error) => setError(e.message))}
           >
             {s.name}
           </button>
@@ -56,6 +59,9 @@ export default function Console() {
               </option>
             ))}
           </select>
+        </label>
+        <label className="ml-2" title="Approve held events as 'scenario runner' (audit log shows it)">
+          <input type="checkbox" checked={autoApprove} onChange={(e) => setAutoApprove(e.target.checked)} /> auto-approve
         </label>
       </section>
 
@@ -76,6 +82,26 @@ export default function Console() {
                 >
                   {e.state}
                 </span>
+                {e.state === "active" && e.approval === "pending" && (
+                  <>
+                    <span className="rounded bg-red-100 px-2 text-xs" title={e.approval_reason ?? ""}>
+                      awaiting approval: {e.approval_reason}
+                    </span>
+                    <button
+                      className="rounded bg-red-700 px-2 text-xs text-white hover:bg-red-600"
+                      onClick={() =>
+                        approveEvent(e.id, operator)
+                          .then(refresh)
+                          .catch((x: Error) => setError(x.message))
+                      }
+                    >
+                      Approve
+                    </button>
+                  </>
+                )}
+                {e.approved_by && e.approved_by !== "auto" && (
+                  <span className="text-xs text-slate-500">approved by {e.approved_by}</span>
+                )}
                 {e.state === "active" && (
                   <button
                     className="rounded border px-2 text-xs hover:bg-slate-100"

@@ -1,8 +1,10 @@
 """Event endpoints.
 
-POST /events            create version 1 (409 if an active event has the key)
-PUT  /events/{key}      a new version of the active event
+POST /events            create version 1 (409 if an active event has the key; 200 and the active
+                        event, with duplicate=true, if an identical event is already active)
+PUT  /events/{key}      a new version of the active event (the same facts again: duplicate=true)
 POST /events/{id}/resolve
+POST /events/{id}/approve   an operator releases an event that waits for approval (D20)
 GET  /events, GET /events/{id}   (the detail has announcements and audio urls)
 POST /events/from-note  a DRAFT for the agent to confirm (SPEC F2). Creates nothing, plays nothing.
 
@@ -13,7 +15,7 @@ A provider failure never gives a 500: scripts fall back to templates and a faile
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import Session, col, select
 
@@ -54,6 +56,12 @@ class ResolveIn(BaseModel):
     payload: dict[str, Any] | None = None
 
 
+class ApproveIn(BaseModel):
+    operator: str = Field(
+        min_length=1, max_length=60, pattern=r"\S"
+    )  # who approved: goes in the audit log
+
+
 class AnnouncementOut(BaseModel):
     id: int
     language: str
@@ -82,11 +90,18 @@ class EventOut(BaseModel):
     payload: dict[str, Any]
     created_at: datetime
     resolved_at: datetime | None
+    approval: str
+    approval_reason: str | None
+    approved_by: str | None
+    approved_at: datetime | None
+    duplicate: bool = False  # this request repeated the active event and changed nothing
     announcements: list[AnnouncementOut] = Field(default_factory=list)
 
 
-def event_out(session: Session, event: Event, *, detail: bool = False) -> EventOut:
-    out = EventOut(**event.model_dump(exclude={"staff_note"}))
+def event_out(
+    session: Session, event: Event, *, detail: bool = False, duplicate: bool = False
+) -> EventOut:
+    out = EventOut(**event.model_dump(exclude={"staff_note"}), duplicate=duplicate)
     if detail:
         rows = session.exec(
             select(Announcement)
@@ -121,9 +136,13 @@ def build_router(ctx: Context) -> APIRouter:
     router = APIRouter()
 
     @router.post("/events", status_code=201)
-    def create_event(body: EventIn) -> EventOut:
+    def create_event(body: EventIn, response: Response) -> EventOut:
         with Session(ctx.engine) as session:
             try:
+                duplicate = events_service.find_duplicate(session, body.site_id, body.payload)
+                if duplicate:
+                    response.status_code = 200
+                    return event_out(session, duplicate, detail=True, duplicate=True)
                 event = events_service.create(
                     session, ctx, site_id=body.site_id, payload=body.payload,
                     event_key=body.event_key, source=body.source, staff_note=body.staff_note,
@@ -135,11 +154,13 @@ def build_router(ctx: Context) -> APIRouter:
     @router.put("/events/{event_key}")
     def update_event(event_key: str, body: EventUpdateIn) -> EventOut:
         with Session(ctx.engine) as session:
+            before = events_service.active_event(session, event_key)
             try:
                 event = events_service.update(session, ctx, event_key, body.payload)
             except (ValidationError, EventError) as exc:
                 raise _refuse(exc) from exc
-            return event_out(session, event, detail=True)
+            duplicate = before is not None and event.id == before.id
+            return event_out(session, event, detail=True, duplicate=duplicate)
 
     @router.post("/events/{event_id}/resolve")
     def resolve_event(event_id: int, body: ResolveIn | None = None) -> EventOut:
@@ -152,6 +173,15 @@ def build_router(ctx: Context) -> APIRouter:
                     session, ctx, row.event_key, body.payload if body else None
                 )
             except (ValidationError, EventError) as exc:
+                raise _refuse(exc) from exc
+            return event_out(session, event, detail=True)
+
+    @router.post("/events/{event_id}/approve")
+    def approve_event(event_id: int, body: ApproveIn) -> EventOut:
+        with Session(ctx.engine) as session:
+            try:
+                event = events_service.approve(session, event_id, body.operator.strip())
+            except EventError as exc:
                 raise _refuse(exc) from exc
             return event_out(session, event, detail=True)
 

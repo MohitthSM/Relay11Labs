@@ -36,6 +36,15 @@ async def asleep(seconds: float) -> None:
     await asyncio.sleep(scaled(seconds))
 
 
+MIN_SLEEP_S = 0.005  # real seconds: the floor at very high speeds, so a loop never spins
+
+
+async def asleep_real(seconds: float) -> None:
+    """Async sleep for a REAL duration the caller has already scaled (e.g. until a zone's clip
+    ends, which was computed with scaled()). Never shorter than MIN_SLEEP_S."""
+    await asyncio.sleep(max(seconds, MIN_SLEEP_S))
+
+
 def sleep(seconds: float) -> None:
     """Blocking, time-scaled sleep for sync code (e.g. retry backoff)."""
     time.sleep(scaled(seconds))

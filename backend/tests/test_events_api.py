@@ -1,5 +1,7 @@
 """Events service and API in mock mode: versioning, resolve, the full path to playable audio."""
 
+import time
+
 import pytest
 from sqlmodel import Session, select
 
@@ -139,7 +141,8 @@ def test_bad_events_are_4xx(client, site, payload, code):
 
 def test_duplicate_active_key_conflicts_and_update_rules(client):
     ev = post(client, "tube_station", JUBILEE).json()
-    assert post(client, "tube_station", JUBILEE).status_code == 409
+    minor = {**JUBILEE, "status": "minor_delays"}
+    assert post(client, "tube_station", minor, event_key=ev["event_key"]).status_code == 409
     key = ev["event_key"]
     assert client.put("/events/unknown-key", json={"payload": JUBILEE}).status_code == 404
     assert client.put(f"/events/{key}", json={"payload": PAGE}).status_code == 422  # type change
@@ -196,19 +199,30 @@ def test_no_passenger_name_in_logs_or_voice_rows(client, engine, caplog):
     assert "Smith" not in dump
 
 
+def next_state_change(ws) -> dict:
+    """The next event.* message; play commands share the socket (D8) and are skipped here."""
+    while True:
+        msg = ws.receive_json()
+        if msg["type"] != "play":
+            return msg
+
+
 def test_websocket_pushes_state_changes(client):
     with client.websocket_connect("/ws/events") as ws:
         assert ws.receive_json() == {"type": "snapshot", "active": []}
         ev = post(client, "tube_station", JUBILEE).json()
-        msg = ws.receive_json()
+        msg = next_state_change(ws)
         assert msg["type"] == "event.created" and msg["event_id"] == ev["id"]
         assert "John" not in str(msg) and "event_key" not in msg
+        assert msg["approval"] == "pending"  # severe delays wait for an operator (D20)
+        client.post(f"/events/{ev['id']}/approve", json={"operator": "Sam"})
+        assert next_state_change(ws)["type"] == "event.approved"
         client.put(
             f"/events/{ev['event_key']}", json={"payload": {**JUBILEE, "status": "minor_delays"}}
         )
-        assert ws.receive_json()["type"] == "event.updated"
-        client.post(f"/events/{ev['id']}/resolve")
-        assert ws.receive_json()["type"] == "event.resolved"
+        assert next_state_change(ws)["type"] == "event.updated"
+        client.post(f"/events/{ev['id'] + 1}/resolve")
+        assert next_state_change(ws)["type"] == "event.resolved"
     with client.websocket_connect("/ws/events") as ws2:  # a late client gets the snapshot
         assert ws2.receive_json()["active"] == []
 
@@ -237,3 +251,48 @@ def test_segment_splitting_can_be_switched_off(settings):
 
     assert billed(True) == 3  # opening, middle, closing
     assert billed(False) == 1  # voiced whole
+
+
+def test_approve_endpoint(client):
+    ev = post(client, "tube_station", JUBILEE).json()
+    assert (ev["approval"], ev["approval_reason"]) == ("pending", "high severity: severe_delays")
+    url = f"/events/{ev['id']}/approve"
+    assert client.post(url, json={"operator": "  "}).status_code == 422
+    assert client.post("/events/999/approve", json={"operator": "Sam"}).status_code == 404
+    out = client.post(url, json={"operator": "Sam"}).json()
+    assert (out["approval"], out["approved_by"]) == ("approved", "Sam") and out["approved_at"]
+    assert client.post(url, json={"operator": "Sam"}).status_code == 409  # already approved
+    routine = post(client, "bus_station", STAND).json()
+    assert (routine["approval"], routine["approved_by"]) == ("auto", "auto")
+    r = client.post(f"/events/{routine['id']}/approve", json={"operator": "Sam"})
+    assert r.status_code == 409
+
+
+def test_duplicate_post_and_put_change_nothing(client):
+    first = post(client, "bus_station", STAND)
+    assert first.status_code == 201 and first.json()["duplicate"] is False
+    again = post(client, "bus_station", STAND)
+    assert again.status_code == 200 and again.json()["duplicate"] is True
+    assert again.json()["id"] == first.json()["id"]
+    same = client.put(f"/events/{first.json()['event_key']}", json={"payload": STAND}).json()
+    assert same["duplicate"] is True and same["version"] == 1
+    assert len(client.get("/events").json()) == 1
+
+
+def test_playback_zones_and_log(client):
+    zones = client.get("/playback/zones").json()
+    assert {z["zone_id"] for z in zones} >= {"gate-23", "concourse-b", "jubilee-eb", "stand-f"}
+    assert [z["zone_id"] for z in client.get("/playback/zones?site_id=airport").json()] == [
+        "gate-23",
+        "concourse-b",
+    ]
+    held = post(client, "tube_station", JUBILEE).json()
+    eb = next(z for z in client.get("/playback/zones").json() if z["zone_id"] == "jubilee-eb")
+    assert eb["held"] == 1 and eb["next"] is None and eb["on_air"] is None
+    client.post(f"/events/{held['id']}/approve", json={"operator": "Sam"})
+    deadline = time.time() + 5
+    while time.time() < deadline and not client.get("/playback/log").json():
+        time.sleep(0.02)
+    rows = client.get("/playback/log", params={"zone_id": "jubilee-eb"}).json()
+    assert rows and rows[0]["approved_by"] == "Sam" and rows[0]["event_id"] == held["id"]
+    assert "John" not in str(client.get("/playback/log").json())

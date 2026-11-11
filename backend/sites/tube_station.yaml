@@ -23,7 +23,8 @@ policies:
   line_status:
     zones: [jubilee-eb, jubilee-wb, ticket-hall]
     interval_s: 300
-    priority: 50
+    priority: delays
+    approval: risk            # severe delays and suspensions wait for an operator (D20)
     resolution_plays: 2
 gazetteer:
   lines: [Jubilee, Victoria, Northern, Central, District, Circle, Piccadilly, Bakerloo,

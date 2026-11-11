@@ -65,6 +65,12 @@ class VoiceRender(SQLModel, table=True):
 
 # Event states
 ACTIVE, SUPERSEDED, RESOLVED = "active", "superseded", "resolved"
+# Approval states
+AUTO, PENDING, APPROVED = "auto", "pending", "approved"
+# Playback job states
+HELD, SCHEDULED, DONE, CANCELLED = "held", "scheduled", "done", "cancelled"
+# Play (PlayLog) states
+PLAYING, PLAYED, STOPPED = "playing", "played", "stopped"
 
 
 class Event(SQLModel, table=True):
@@ -79,9 +85,16 @@ class Event(SQLModel, table=True):
     source: str = "api"  # form | staff_note | tfl | replay | api
     staff_note: str | None = None
     state: str = Field(default=ACTIVE, index=True)  # active | superseded | resolved
-    priority: int = 50
+    priority: int = 30  # rank of the policy's priority class (sites.PRIORITY)
     created_at: datetime = Field(default_factory=timeutil.now)
     resolved_at: datetime | None = None
+    # Human in the loop (D20). auto: played without approval. pending: waiting for an operator.
+    # approved: an operator approved it. approved_by is an operator name or "auto", never a
+    # passenger's.
+    approval: str = AUTO  # auto | pending | approved
+    approval_reason: str | None = None  # why it waits: "staff note", "high severity: suspended"
+    approved_by: str | None = None
+    approved_at: datetime | None = None
 
 
 class LLMCall(SQLModel, table=True):
@@ -123,26 +136,52 @@ class Announcement(SQLModel, table=True):
 
 
 class PlaybackJob(SQLModel, table=True):
-    """ "Play this event's sequence in this zone on this cadence." Used from Phase 5."""
+    """ "Play this event's sequence in this zone on this cadence." One per (event version, zone).
+
+    held: waiting for operator approval. scheduled: plays when next_at comes. done: ran out of
+    plays or time. cancelled: the event was updated or resolved (its queued plays are dropped).
+    """
 
     id: int | None = Field(default=None, primary_key=True)
     event_id: int = Field(foreign_key="event.id", index=True)
-    zone_id: str
+    zone_id: str = Field(index=True)
+    languages: list[str] = Field(default_factory=list, sa_column=Column(JSON))  # play order
+    is_resolution: bool = False  # plays the event's resolution announcements
     next_at: datetime
-    interval_s: int
+    interval_s: int  # scenario seconds; scaled when next_at is computed
     plays_done: int = 0
     max_plays: int | None = None
+    duration_s: int | None = None  # ends_at = start + duration (set when the job is released)
     ends_at: datetime | None = None
     escalate: bool = False
-    priority: int = 50
-    state: str = "scheduled"  # scheduled | done | cancelled
+    priority: int = 30
+    state: str = Field(default=SCHEDULED, index=True)  # held | scheduled | done | cancelled
+    created_at: datetime = Field(default_factory=timeutil.now)
 
 
 class PlayLog(SQLModel, table=True):
-    """What actually played, where and when. Used from Phase 5."""
+    """The audit log: one row per play (one sequence of languages) in one zone.
+
+    What played (announcement ids and their script provenance), where (zone), when (started,
+    finished), which script version (event version, prompt version or template) and who approved
+    it. Ids and versions only: no script text, no passenger names (R11).
+    """
 
     id: int | None = Field(default=None, primary_key=True)
-    job_id: int | None = Field(default=None, foreign_key="playbackjob.id")
-    zone_id: str
+    job_id: int | None = Field(default=None, foreign_key="playbackjob.id", index=True)
+    event_id: int | None = Field(default=None, foreign_key="event.id", index=True)
+    event_version: int = 1
+    zone_id: str = Field(index=True)
+    urgency: int = 1
+    is_resolution: bool = False
+    priority: int = 30
     announcement_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
-    played_at: datetime = Field(default_factory=timeutil.now)
+    # one entry per announcement: {"announcement_id", "language", "source", "prompt_version"}
+    scripts: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    played_at: datetime = Field(default_factory=timeutil.now)  # the first clip went on air
+    finished_at: datetime | None = None  # the last clip ends (or the play was stopped)
+    clips_played: int = 0
+    interruptions: int = 0  # times a higher-priority play cut in between two clips
+    status: str = PLAYING  # playing | played | stopped (event updated or resolved mid-sequence)

@@ -1,6 +1,7 @@
 """Scenario feed and speed control.
 
-POST /scenarios/{name}/run?speed=60   start a scenario in the background (A, B or C)
+POST /scenarios/{name}/run?speed=60&auto_approve=true   start a scenario in the background
+                                      (A, B or C); auto_approve plays held events unattended
 GET  /scenarios                       the scenarios and the current speed
 GET  /scenarios/runs/{run_id}         progress of a run
 GET/PUT /speed                        time scale: 60 means one minute passes in one second
@@ -39,7 +40,9 @@ def build_router(ctx: Context) -> APIRouter:
 
     @router.post("/scenarios/{name}/run", status_code=202)
     async def run_scenario(
-        name: str, speed: float | None = Query(None, gt=0, le=10000)
+        name: str,
+        speed: float | None = Query(None, gt=0, le=10000),
+        auto_approve: bool = False,
     ) -> replay.RunStatus:
         scenario = replay.get_scenario(name)
         if scenario is None:
@@ -48,7 +51,7 @@ def build_router(ctx: Context) -> APIRouter:
             timeutil.set_scale(speed)
         status = replay.RunStatus(run_id=uuid4().hex[:12], scenario=name)
         runs[status.run_id] = status
-        task = asyncio.create_task(replay.run(ctx, scenario, status))
+        task = asyncio.create_task(replay.run(ctx, scenario, status, auto_approve))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         return status

@@ -37,7 +37,7 @@ Do not contradict a decision in ARCHITECTURE.md silently. If a change needs one,
   - `anthropic` (Claude API) and `elevenlabs` (official SDK, pinned `>=2.77,<3`)
   - `mutagen` (audio duration), `pydub` (stitches clips; needs the `ffmpeg` binary for MP3; `audioop-lts` is its Python 3.13 shim), `httpx` (TfL), `pyyaml`
 - **Tooling:** `uv` for env and deps, `pytest`, `pytest-asyncio`, `ruff` (lint + format), `pyright` (types, on `relay/` and `scripts/`).
-- **Frontend:** React + Vite + TypeScript + Tailwind. No state library: `fetch` + `useState`/`useEffect`, and native `EventSource` for SSE.
+- **Frontend:** React + Vite + TypeScript + Tailwind. No state library: `fetch` + `useState`/`useEffect`, and native `WebSocket` for the one real-time channel (`/ws/events`, D8).
 - **Models (via `.env`):**
   - `SCRIPT_MODEL_DEFAULT=claude-haiku-5-5`
   - `SCRIPT_MODEL_ESCALATION=claude-sonnet-5-5`, used for fact-lock retries and all staff notes
@@ -56,17 +56,18 @@ relay/
 │   │   ├── main.py                # FastAPI app, lifespan starts scheduler + sources
 │   │   ├── config.py              # Settings (pydantic-settings), mock/live resolution
 │   │   ├── db.py                  # engine, session dependency, create_all
-│   │   ├── models.py              # SQLModel tables: Event, LLMCall, Announcement, AudioClip, VoiceRender, PlaybackJob, PlayLog
+│   │   ├── models.py              # SQLModel tables: Event, LLMCall, Announcement, AudioClip, VoiceRender, PlaybackJob, PlayLog (audit log)
 │   │   ├── context.py             # Context: providers + settings + engine, shared by routers and services
 │   │   ├── retry.py               # call_with_retry (TTS retries in voice.py, D14)
 │   │   ├── schemas.py             # Pydantic event payloads (discriminated union) + API DTOs
 │   │   ├── sites.py               # load/validate sites/*.yaml
-│   │   ├── events.py              # create / update / resolve; orchestrates script → voice → schedule
+│   │   ├── events.py              # create / update / resolve / approve, dedup; orchestrates script → voice → jobs
+│   │   ├── jobs.py                # playback jobs per event version: approval rule, hold, release, cancel
 │   │   ├── voice.py               # model routing, content-hash cache, segments + stitching, metrics
 │   │   ├── pronunciation.py       # PLS parsing, pronunciation.lock.json
 │   │   ├── pronsync.py            # create/update a site's dictionary (used by the script)
-│   │   ├── scheduler.py           # 1 s tick loop, zone busy tracking, escalation
-│   │   ├── bus.py                 # in-memory fan-out (WebSocket state changes, SSE play commands)
+│   │   ├── scheduler.py           # 1 s tick loop: zone queues, priority preemption + resume, escalation, expiry
+│   │   ├── bus.py                 # in-memory fan-out to WebSocket clients (state changes and play commands)
 │   │   ├── timeutil.py            # now(), scaled(seconds) — the ONLY place RELAY_TIME_SCALE is read
 │   │   ├── prompts.py             # load versioned prompt files (backend/prompts/)
 │   │   ├── script/
@@ -163,7 +164,7 @@ Voice ids and pronunciation dictionary locators are set per site in `sites/*.yam
 - Pure core, thin edges:
   - `factlock.py`, `templates.py`, `normalize.py` and scheduler decision logic do no I/O and take explicit arguments (lexicon and prompt files are read once and cached).
   - Time comes in as a parameter (`now: datetime`), never from `datetime.now()` inside logic.
-- Sync SQLModel sessions inside FastAPI's threadpool are fine. Only `scheduler.py`, `bus.py` and the SSE endpoint are `async`. Blocking provider calls are run with `asyncio.to_thread`.
+- Sync SQLModel sessions inside FastAPI's threadpool are fine. Only `scheduler.run`, `bus.py`, the replay runner and the WebSocket endpoint are `async`; the scheduler tick (`scheduler.step`) is sync and takes `now`, so tests drive it with a fake clock. Blocking provider calls are run with `asyncio.to_thread`.
 - All intervals go through `timeutil.scaled()`. Never `asyncio.sleep(<literal>)` outside `timeutil`.
 - Each event payload field that is a fact is declared in `schemas.py` with `Field(json_schema_extra={"fact": True})`. The fact lock and the prompt read that metadata, so the fact list has a single source.
 - Errors: providers raise `ProviderError`, and the engine catches it and falls back. API handlers return 4xx for validation errors and never 500 for a provider failure.

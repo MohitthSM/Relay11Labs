@@ -266,6 +266,10 @@ Sources: elevenlabs.io/docs (models, text-to-speech capability, Eleven v4, best-
 
 † Median model latency per the docs, excluding network. `eleven_turbo_v2*` is deprecated in favour of Flash.
 
+**v4 Turbo vs v4 on the same script (Phase 8): not measured yet.** No ElevenLabs key was available in the build environment. The method is ready: `scripts/render_samples.py` renders scenario B's level-1 script in EN, ES and FR on both models (no chime, each model in its own cold cache) and records characters, cost, time to first audio and total time per clip in `docs/samples/report.md`. Until someone has listened to the clips, D17 stays as it is. Known before listening: v4 costs twice as much per character ($0.08 vs $0.04, same on every plan, checked 2026-11-11). Scenario B's three level-1 clips are 383 characters: $0.015 on Turbo, $0.031 on v4.
+
+**Voice choice (Phase 8): still the placeholder.** The docs say every default voice is retired on 2026-12-31 and replaced by new ones, and they do not publish voice ids. So the voice must come from the account's own voices list: `scripts/pick_voice.py` calls `GET /v2/voices` and ranks voices by verification in EN/ES/FR, by an announcer or narration use case, and by not being legacy. The final pick is made by listening.
+
 **Facts that shaped the design:**
 - **One voice, many languages.** On v4, when the target language differs from the voice's language, the output is fluent native speech, not accented speech. One brand voice serves EN/ES/FR. This is a pitch point.
 - **Pronunciation dictionaries:**
@@ -294,7 +298,7 @@ Sources: elevenlabs.io/docs (models, text-to-speech capability, Eleven v4, best-
 | LLM: about 2 Sonnet 5.5 calls (retry and staff note) at $2 / $10 per MTok | ≈ **$0.03** |
 | **Total** | **≈ $0.16**. A warm-cache rerun costs only the LLM calls. |
 
-Prices live in `providers/pricing.py`. Check them against the provider pages before the pitch.
+Prices live in `providers/pricing.py`, checked against the provider pages on 2026-11-11. For a day of real operation (a simulated busy day at one station: 204 plays, 802 characters billed, about $0.03), see `docs/COSTS.md`.
 
 ## 9. Claude API usage notes (for the Anthropic provider)
 

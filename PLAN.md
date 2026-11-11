@@ -149,6 +149,25 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 8: Polish
 
+> **Status:** the review, docs and packaging are done and green in mock mode; **every live check is blocked** because no ElevenLabs or Anthropic key was available to the build session (none in the environment, and the key request was declined). Nothing below claims a live result.
+>
+> **Done:**
+> - **Source switch, both ways** (D23): Live → Demo withdraws TfL events, so they never play over a scenario. Demo → Live stops a running scenario and withdraws its events. A lock makes each switch and a poll or step in flight mutually exclusive. Tests: `tests/test_source_switch.py`.
+> - **Code review**, findings and fixes in `docs/REVIEW.md`: the R11 PII purge (`relay/purge.py`), announcement → `LLMCall` linked by attempt, one failed clip no longer fails the whole event, fixed segments warmed at start-up with live TTS, dead code removed, type ignores removed.
+> - **Docs and packaging:** README (problem, quickstart, Mermaid diagram, decisions, roadmap), `docs/COSTS.md` (a simulated busy day, `scripts/simulate_day.py`), and `docker compose up --build` (built and clicked through: console, WebSocket, scenario B).
+> - **Tools for the live checks**, each one command once a key exists:
+>   - `scripts/pick_voice.py`: lists the account's voices (GET /v2/voices) and ranks them for PA use.
+>   - `scripts/render_samples.py`: scenario B (9 clips) and A (3 versions) as MP3s in `docs/samples/` with a per-clip report (model, characters, cost, TTFA, total), plus the same B script on `eleven_v4_turbo` and `eleven_v4`.
+>
+> **Live verification, still open (needs keys):**
+> 1. `cd backend && uv run pytest -m live -q` (Claude and ElevenLabs smoke tests). Not run.
+> 2. `make sync-pronunciations`, then commit `sites/pronunciation.lock.json`. Not run, so there is no lock file and requests carry no dictionary yet.
+> 3. `uv run python scripts/render_samples.py`, then commit `docs/samples/`. Not run. TTFA, characters and cost per clip are unmeasured. The characters are known from mock (see `docs/COSTS.md`); cost follows from the price table.
+> 4. Listen to `docs/samples/compare_*` and record v4 Turbo vs v4 in ARCHITECTURE §7. Not done.
+> 5. `uv run python scripts/pick_voice.py`, listen in EN/ES/FR, then set `voice_id` in `sites/*.yaml`. Not done: the placeholder `JBFqnCBsd6RMkjVDRZzb` stays. The ElevenLabs docs say the default voices are retired on 2026-12-31, so pick a non-legacy voice.
+>
+> **Not done from the list below:** `audio_effects`, chime loudness matching, `passenger_name_ipa`, v4 audio tags for level 3, and `speechSynthesis` in mock mode. All of them need listening with live audio, except the last, which was left out to keep mock mode deterministic. The ffmpeg layer of the backend image could not be built in the build environment (`deb.debian.org` is blocked there); it is a standard Debian package.
+
 **Goal:** make the pitch land.
 
 - **Audio:**

@@ -179,6 +179,9 @@ def main() -> int:
         with Session(engine) as session:
             voice.seed_cache(session, settings, args.out)
             jobs = build_jobs(settings, llm, args.all_b)
+            if llm.mode == "mock":  # the mock LLM returns the template wording
+                for job in jobs:
+                    job.source = "template (mock LLM)" if job.source == "llm" else job.source
             if args.only:
                 wanted = {x.strip() for x in args.only.split(",") if x.strip()}
                 unknown = wanted - {j.stem for j in jobs}
@@ -240,7 +243,8 @@ def write_report(path: Path, manifest: dict) -> None:
             lines += ["| Clip | Model | Script | Chars | TTFA (ms) | Total (ms) |",
                       "|---|---|---|---|---|---|"]  # fmt: skip
             lines += [f"| {c['clip']} | {c['model']} | {c['script']} | {c['characters']} "
-                      f"| {c['ttfa_ms']} | {c['total_ms']} |" for c in run["clips"]]  # fmt: skip
+                      f"| {c['ttfa_ms'] or 'n/a'} | {c['total_ms'] or 'n/a'} |"
+                      for c in run["clips"]]  # fmt: skip
             lines.append("")
         lines += [f"Run total: **{run['total']}** characters.", ""]
     total = sum(r["total"] for r in manifest["ledger"])

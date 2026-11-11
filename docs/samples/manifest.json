@@ -54,7 +54,7 @@
     {
      "clip": "b_en_u1",
      "model": "eleven_v4_turbo",
-     "script": "llm",
+     "script": "template (mock LLM)",
      "characters": 124,
      "ttfa_ms": 2216,
      "total_ms": 2819

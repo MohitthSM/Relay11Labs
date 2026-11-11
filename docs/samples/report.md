@@ -8,7 +8,7 @@ to first audio byte; 0 characters means the clip was already in the cache.
 
 | Clip | Model | Script | Chars | TTFA (ms) | Total (ms) |
 |---|---|---|---|---|---|
-| smoke: 'Customer information.' + 'Holborn and Marylebone are open.' | eleven_v4_turbo | test | 53 | 0 | 0 |
+| smoke: 'Customer information.' + 'Holborn and Marylebone are open.' | eleven_v4_turbo | test | 53 | n/a | n/a |
 
 Run total: **53** characters.
 
@@ -16,7 +16,7 @@ Run total: **53** characters.
 
 | Clip | Model | Script | Chars | TTFA (ms) | Total (ms) |
 |---|---|---|---|---|---|
-| b_en_u1 | eleven_v4_turbo | llm | 124 | 2216 | 2819 |
+| b_en_u1 | eleven_v4_turbo | template (mock LLM) | 124 | 2216 | 2819 |
 
 Run total: **124** characters.
 

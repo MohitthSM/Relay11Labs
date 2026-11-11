@@ -1,10 +1,9 @@
-"""Engine, session dependency, create_all."""
+"""Engine and create_all."""
 
-from collections.abc import Iterator
 from pathlib import Path
 
 from sqlalchemy.engine import Engine
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import SQLModel, create_engine
 
 from relay.config import get_settings
 
@@ -20,13 +19,3 @@ def init_db(engine: Engine) -> None:
     import relay.models  # noqa: F401  (registers tables)
 
     SQLModel.metadata.create_all(engine)
-
-
-def session_dependency(engine: Engine):
-    """Build a FastAPI dependency bound to one engine."""
-
-    def get_session() -> Iterator[Session]:
-        with Session(engine) as session:
-            yield session
-
-    return get_session

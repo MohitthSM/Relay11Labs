@@ -67,6 +67,7 @@ relay/
 │   │   ├── pronunciation.py       # PLS parsing, pronunciation.lock.json
 │   │   ├── pronsync.py            # create/update a site's dictionary (used by the script)
 │   │   ├── scheduler.py           # 1 s tick loop: zone queues, priority preemption + resume, escalation, expiry
+│   │   ├── purge.py               # R11: scrub names, scripts and audio of ended pages after the retention
 │   │   ├── bus.py                 # in-memory fan-out to WebSocket clients (state changes and play commands)
 │   │   ├── timeutil.py            # now(), scaled(seconds) — the ONLY place RELAY_TIME_SCALE is read
 │   │   ├── prompts.py             # load versioned prompt files (backend/prompts/)

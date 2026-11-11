@@ -448,6 +448,9 @@ def render_many(
                     _store_segment(session, settings, provider, seg, gens[seg.key])
                 except ProviderError as exc:
                     errors[seg.key] = exc
+                except Exception as exc:  # a bug or a disk error: one clip fails, not the event
+                    log.exception("segment %s failed", seg.key[:12])
+                    errors[seg.key] = ProviderError(f"unexpected: {type(exc).__name__}")
                 for i, plan in enumerate(plans):
                     if results[i] is None and seg.key in plan.waiting:
                         plan.waiting.discard(seg.key)
@@ -494,7 +497,12 @@ def _finish(
         clip = _live_clip(session, settings, plan.clip_key)
         served_whole = clip is not None  # cached before, or built by an identical item just now
         if clip is None:
-            clip = _build_announcement(session, settings, provider, plan)
+            try:
+                clip = _build_announcement(session, settings, provider, plan)
+            except Exception as exc:  # e.g. ffmpeg missing for MP3: the text still stands
+                log.exception("stitch failed event=%s ann=%s", item.event_id, item.announcement_id)
+                out.error = ProviderError(f"stitch failed: {type(exc).__name__}")
+                return out
     else:
         clip = session.get(AudioClip, plan.clip_key)  # the single segment is the announcement
     assert clip is not None

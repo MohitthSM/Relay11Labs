@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     relay_mock_hallucinate: bool = False  # mock LLM injects one false fact per event (demo)
     relay_time_scale: float = 1.0  # read ONLY by timeutil.py
     relay_db_url: str = "sqlite:///data/relay.db"
+    relay_pii_retention_hours: float = 24.0  # R11: real hours after a page ends (purge.py)
 
     # Real data (Phase 7). Demo mode plays the scripted scenarios; live mode polls TfL.
     relay_data_mode: Literal["demo", "live"] = "demo"  # the start-up mode; the UI can switch it

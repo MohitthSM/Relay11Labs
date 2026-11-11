@@ -509,6 +509,29 @@ def tts_failing() -> MockTTSProvider:
     return t
 
 
+def test_unexpected_provider_exception_fails_one_clip_not_the_batch(session, vsettings):
+    class Broken(MockTTSProvider):
+        def synthesize(self, req):
+            if "bad" in req.text:
+                raise KeyError("an SDK change the provider does not map")
+            return super().synthesize(req)
+
+    items = [Item("A bad one here.", "en"), Item("A good one here.", "en")]
+    out = voice.render_many(session, Broken(), vsettings, get_site("airport"), items)
+    assert isinstance(out[0].error, ProviderError) and out[0].clip_id is None
+    assert out[1].clip_id and out[1].error is None
+
+
+def test_stitch_failure_comes_back_as_an_error(session, tts, vsettings, monkeypatch):
+    def no_ffmpeg(*args, **kwargs):
+        raise FileNotFoundError("ffmpeg")
+
+    monkeypatch.setattr(voice, "stitch", no_ffmpeg)
+    out = voice.render_many(session, tts, vsettings, get_site("airport"),
+                            [Item("Chimed line here.", "en", chime=True)])  # fmt: skip
+    assert out[0].error is not None and "stitch" in str(out[0].error)
+
+
 def test_empty_text_is_refused(session, tts, vsettings, tube):
     with pytest.raises(ValueError):
         voice.render(session, tts, vsettings, tube, Item("  ", "en"))

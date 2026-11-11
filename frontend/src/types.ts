@@ -184,7 +184,7 @@ export type ScenarioList = { speed: number; scenarios: ScenarioInfo[] };
 export type RunStatus = {
   run_id: string;
   scenario: string;
-  state: "running" | "done" | "failed";
+  state: "running" | "done" | "failed" | "stopped"; // stopped: the source switched to live
   steps_done: number;
   steps_total: number;
   error: string | null;

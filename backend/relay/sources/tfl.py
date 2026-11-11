@@ -339,30 +339,36 @@ def _apply_all(ctx: Context, state: FeedState, site: Site, readings: dict[str, R
             log.info("TfL %s severity %d -> %s", line_id, reading.severity, action)
 
 
-def withdraw_all(ctx: Context) -> int:
-    """Withdraw every active TfL event (jobs cancelled, no "good service" message). Returns how
-    many. The scheduler drops their queued clips on its next tick; a clip already on air ends
-    first, and a zone airs one clip at a time, so nothing from TfL overlaps a scenario."""
+REPLAY_SOURCE = "replay"  # events made by the scenario runner (sources/replay.py)
+
+
+def withdraw_all(ctx: Context, source: str) -> int:
+    """Withdraw every active event from `source` (jobs cancelled, no "good service" message).
+    Returns how many. The scheduler drops their queued clips on its next tick; a clip already on
+    air ends first, and a zone airs one clip at a time, so nothing overlaps what comes next."""
     with Session(ctx.engine) as session:
-        rows = session.exec(select(Event).where(Event.state == ACTIVE, Event.source == SOURCE))
+        rows = session.exec(select(Event).where(Event.state == ACTIVE, Event.source == source))
         withdrawn = [events_service.withdraw(session, e) for e in rows.all()]
     return len(withdrawn)
 
 
 def set_mode(ctx: Context, state: FeedState, mode: DataMode) -> int:
-    """Switch the data source. Blocking. Returns how many TfL events were withdrawn.
+    """Switch the data source. Blocking. Returns how many events were withdrawn.
 
-    live -> polls at once.
     demo -> the poller stops and every active TfL event is withdrawn, so live data never plays
             over a scripted scenario. Back in live mode the first poll announces a line that is
             still disrupted as a new event, from fresh data.
+    live -> polls at once. A running scenario stops before its next step (it checks the mode
+            under this lock) and the events scenarios made are withdrawn, so scripted
+            disruption never plays as if it were real.
+    Events an operator made (form, staff note, API) are never touched.
     """
     with state.lock:
         if mode == "live" and state.mode != "live":
             state.next_poll = None
             state.failures, state.last_error = 0, None
         state.mode = mode
-        return withdraw_all(ctx) if mode == "demo" else 0
+        return withdraw_all(ctx, SOURCE if mode == "demo" else REPLAY_SOURCE)
 
 
 async def run(ctx: Context, state: FeedState, fetch: Fetch | None = None) -> None:

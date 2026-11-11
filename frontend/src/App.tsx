@@ -245,6 +245,7 @@ export default function App() {
                   {letter} · {s.name.slice(2)}
                   {r?.state === "running" && <span className="ml-1.5 text-phosphor">{r.steps_total ? `${r.steps_done}/${r.steps_total}` : "…"}</span>}
                   {r?.state === "failed" && <span className="ml-1.5 text-alert">failed</span>}
+                  {r?.state === "stopped" && <span className="ml-1.5 text-dim">stopped</span>}
                 </button>
               );
             })}

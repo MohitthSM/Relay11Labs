@@ -78,7 +78,7 @@ def active_event(session: Session, event_key: str) -> Event | None:
 def find_duplicate(session: Session, site_id: str, payload: dict[str, Any]) -> Event | None:
     """The active event at this site with exactly these facts, if any (D21). A bad payload
     raises ValidationError."""
-    probe = EventInput(event_key="-", site_id=site_id, payload=payload)  # type: ignore[arg-type]
+    probe = EventInput.of(event_key="-", site_id=site_id, payload=payload)
     facts = probe.payload.model_dump()
     rows = session.exec(
         select(Event).where(
@@ -100,7 +100,7 @@ def create(
 ) -> Event:
     """Version 1 of a new event. A bad payload raises ValidationError (the API answers 422).
     An event identical to an active one is a duplicate: the active one is returned unchanged."""
-    probe = EventInput(event_key=event_key or "-", site_id=site_id, payload=payload)  # type: ignore[arg-type]
+    probe = EventInput.of(event_key=event_key or "-", site_id=site_id, payload=payload)
     site = get_site_for(site_id, probe.type)
     duplicate = find_duplicate(session, site_id, payload)
     if duplicate:
@@ -120,7 +120,7 @@ def update(
     current = active_event(session, event_key)
     if current is None:
         raise EventError(404, "no active event with this key")
-    probe = EventInput(event_key=event_key, site_id=current.site_id, payload=payload)  # type: ignore[arg-type]
+    probe = EventInput.of(event_key=event_key, site_id=current.site_id, payload=payload)
     if probe.type != current.type:
         raise EventError(422, "an update cannot change the event type")
     site = get_site_for(current.site_id, current.type)
@@ -157,7 +157,7 @@ def resolve(
         wanted = {**wanted, "status": "good_service"}
         if payload and payload.get("status") not in (None, "good_service"):
             raise EventError(422, "a line is resolved with status good_service")
-        res = EventInput(event_key=event_key, site_id=event.site_id, payload=wanted)  # type: ignore[arg-type]
+        res = EventInput.of(event_key=event_key, site_id=event.site_id, payload=wanted)
         _announce(session, ctx, site, event, res, is_resolution=True)
         jobs.schedule_event(session, event, site, now, resolution=True)
     session.commit()
@@ -225,7 +225,7 @@ def _new_version(
     )
     session.add(event)
     session.flush()  # the id is needed for the child rows
-    ev_input = EventInput(event_key=key, site_id=site.id, version=version, payload=payload)  # type: ignore[arg-type]
+    ev_input = EventInput.of(event_key=key, site_id=site.id, version=version, payload=payload)
     _announce(session, ctx, site, event, ev_input, previous=previous or [])
     jobs.schedule_event(session, event, site, timeutil.now())
     session.commit()
@@ -282,7 +282,9 @@ def _persist_plan(
     session.flush()
     rows = []
     for slot in plan.scripts:
-        accepted = next((c for c in calls if slot.model and c.model == slot.model), None)
+        # by attempt, not model name: the API may report a different model string than the one
+        # requested (server-side fallback), and both attempts may be configured on one model
+        accepted = next((c for c in calls if slot.attempt and c.attempt == slot.attempt), None)
         ann = Announcement(
             event_id=event_id,
             language=slot.language,

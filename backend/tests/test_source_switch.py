@@ -4,6 +4,7 @@ Drives the real path in mock mode with a fake clock: TfL poll -> events service 
 """
 
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from relay import events as events_service
 from relay.context import Context
 from relay.models import ACTIVE, CANCELLED, WITHDRAWN, Announcement, Event, PlaybackJob
 from relay.providers import build_connectors
-from relay.sources import tfl
+from relay.sources import replay, tfl
 
 FIXTURES = Path(__file__).parent / "fixtures" / "tfl"
 T0 = datetime(2026, 11, 11, 9, 0, tzinfo=UTC)
@@ -98,9 +99,8 @@ def test_held_tfl_event_is_withdrawn_too(ctx, engine, clock):
     [event] = tfl_events(engine)
     assert event.approval == "pending"
     tfl.set_mode(ctx, feed, "demo")
-    with Session(engine) as s:
-        with pytest.raises(events_service.EventError) as err:
-            events_service.approve(s, event.id or 0, "op")
+    with Session(engine) as s, pytest.raises(events_service.EventError) as err:
+        events_service.approve(s, event.id or 0, "op")
     assert err.value.status == 409
 
 
@@ -162,3 +162,34 @@ def test_operator_and_scenario_events_are_not_withdrawn(ctx, engine, clock):
 def test_source_api_reports_withdrawn(client):
     assert client.put("/source", json={"mode": "live"}).json()["withdrawn"] == 0
     assert client.put("/source", json={"mode": "demo"}).json()["withdrawn"] == 0
+
+
+# --- Demo -> Live: the mirror image ------------------------------------------------------------
+
+
+def test_switch_to_live_stops_a_running_scenario_and_withdraws_its_events(client, engine):
+    """At speed 1 scenario A's second step is 6 real minutes away: the switch lands in between."""
+    run_id = client.post("/scenarios/a_jubilee/run", params={"speed": 1}).json()["run_id"]
+    deadline = time.time() + 10
+    while client.get(f"/scenarios/runs/{run_id}").json()["steps_done"] < 1:
+        assert time.time() < deadline, "first step never ran"
+        time.sleep(0.02)
+
+    assert client.put("/source", json={"mode": "live"}).json()["withdrawn"] == 1
+    while client.get(f"/scenarios/runs/{run_id}").json()["state"] == "running":
+        assert time.time() < deadline, "scenario kept running in live mode"
+        time.sleep(0.02)
+    status = client.get(f"/scenarios/runs/{run_id}").json()
+    assert (status["state"], status["steps_done"]) == ("stopped", 1)
+    with Session(engine) as s:
+        rows = s.exec(select(Event).where(Event.source == "replay")).all()
+    assert [e.state for e in rows] == [WITHDRAWN]  # step 2 (the update) never happened
+
+
+def test_a_scenario_step_never_lands_in_live_mode(ctx, engine):
+    feed = tfl.FeedState(mode="live")
+    scenario = replay.get_scenario("c_route25")
+    assert scenario is not None
+    assert replay.apply_step_in_demo(ctx, feed, scenario, scenario.events[0], False) is False
+    with Session(engine) as s:
+        assert s.exec(select(Event)).all() == []

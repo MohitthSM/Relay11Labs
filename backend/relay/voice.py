@@ -23,6 +23,7 @@ import io
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -564,6 +565,59 @@ def _finish(
 
 def _keys(plan: _Plan) -> list[str]:
     return [s.key for s in plan.segs]
+
+
+# --- dry run and committed clips ----------------------------------------------------------------
+
+
+def characters_to_bill(
+    session: Session, tts: TTSProvider, settings: Settings, site: Site, items: list[Item]
+) -> list[int]:
+    """What render_many would send to TTS for each item, given the cache now. Nothing is
+    generated. A segment needed twice in the batch is billed to the first item only."""
+    provider = provider_name(tts)
+    counted: set[str] = set()
+    out = []
+    for item in items:
+        plan = _plan(item, provider, settings, site)
+        chars = 0
+        if not _live_clip(session, settings, plan.clip_key):
+            for seg in plan.segs:
+                if seg.key not in counted and not _live_clip(session, settings, seg.key):
+                    counted.add(seg.key)
+                    chars += len(seg.req.text)
+        out.append(chars)
+    return out
+
+
+MANIFEST = "manifest.json"
+
+
+def read_manifest(samples_dir: Path) -> dict:
+    path = samples_dir / MANIFEST
+    if not path.exists():
+        return {"clips": [], "ledger": []}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def seed_cache(session: Session, settings: Settings, samples_dir: Path) -> int:
+    """Import committed clips (docs/samples/manifest.json) into the audio cache, so real
+    ElevenLabs audio that was paid for once is never generated again. Rows hold ids, model and
+    counts only, as rendered ones do. Returns how many clips were added."""
+    added = 0
+    for entry in read_manifest(samples_dir)["clips"]:
+        src = samples_dir / entry["file"]
+        if _live_clip(session, settings, entry["id"]) or not src.exists():
+            continue
+        name = f"{entry['id']}{src.suffix}"
+        shutil.copyfile(src, audio_dir(settings) / name)
+        fields = {k: entry[k] for k in ("kind", "permanent", "provider", "model_id", "voice_id",
+                                        "language", "characters", "cost_usd", "duration_s",
+                                        "parts")}  # fmt: skip
+        session.merge(AudioClip(id=entry["id"], path=name, **fields))
+        added += 1
+    session.commit()
+    return added
 
 
 # --- fixed segments, warmed ahead of time -----------------------------------------------------

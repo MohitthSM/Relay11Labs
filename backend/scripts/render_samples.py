@@ -1,17 +1,23 @@
-"""Render the pitch samples with real audio, and the v4 Turbo vs v4 comparison.
+"""Render the pitch samples with real ElevenLabs audio, within a character budget.
 
-    uv run python scripts/render_samples.py                 # needs ELEVENLABS_API_KEY in .env
-    uv run python scripts/render_samples.py --out /tmp/x    # mock mode allowed (WAV, not samples)
+    uv run python scripts/render_samples.py          # the plan: characters per clip, no API call
+    uv run python scripts/render_samples.py --go     # render what the plan says, then commit
+                                                     # docs/samples/ (MP3s + manifest.json)
 
-What it writes to --out (default ../docs/samples):
-  b_<lang>_u<level>.mp3     scenario B: the 9 clips (EN, ES, FR x levels 1-3), as the app makes them
-  a_v1_severe.mp3, a_v2_minor.mp3, a_resolved.mp3   scenario A: the three versions, EN
-  compare_b_<lang>_u1_<model>.mp3   the same scenario B level-1 script on each model, no chime
-  report.md                 per clip: model, characters billed, cost, time to first audio, total
-Scripts come from the real script engine (Claude if ANTHROPIC_API_KEY is set, else templates),
-voice from the real voice layer, against a throwaway database, so nothing touches data/.
-The voice cache is per run: every clip here is a cold render, which is what TTFA should measure.
-Listen to the compare_* files before deciding D17's routing; the script records numbers only.
+The sample set (kept small for a free-tier key):
+  b_en_u1, b_en_u3, b_es_u1, b_fr_u1   scenario B, the page at urgency 1 (EN, ES, FR) and 3 (EN)
+  a_v1_en                              scenario A, the first announcement (EN)
+  compare_b_en_u1_<model>              the same short EN script on each TTS model: the v4 Turbo
+                                       side is b_en_u1's own speech, so only the v4 side is new
+Scripts come from the real script engine (Claude when ANTHROPIC_API_KEY is set, else the
+templates), voice from the real voice layer.
+
+Never paid twice: every clip ever rendered is listed in docs/samples/manifest.json and its file
+is committed. The cache is seeded from it before planning, so a clip already there costs 0, and
+the app seeds the same clips at start-up (voice.seed_cache), so the demo replays them for free.
+The manifest's ledger records the characters of every run (and of earlier spending, like the
+live smoke test); the script stops before a run that would pass --budget. Characters are what
+ElevenLabs bills; this counts one credit per character, which can only overstate.
 """
 
 import argparse
@@ -20,6 +26,7 @@ import shutil
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlmodel import Session
@@ -27,8 +34,8 @@ from sqlmodel import Session
 from relay import timeutil, voice
 from relay.config import Settings, get_settings
 from relay.db import init_db, make_engine
+from relay.models import AudioClip
 from relay.providers import build_llm, build_tts
-from relay.providers.tts_base import TTSProvider
 from relay.schemas import EventInput
 from relay.script.engine import build_context, generate
 from relay.sites import Site, load_sites
@@ -36,137 +43,190 @@ from relay.sites import Site, load_sites
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "scenarios"
 DEFAULT_OUT = ROOT.parent / "docs" / "samples"
+B_SLOTS = [("en", 1), ("en", 3), ("es", 1), ("fr", 1)]
 
 
 @dataclass
-class Row:
-    file: str
-    language: str
-    urgency: int
-    model: str
+class Job:
+    stem: str
+    site: Site
+    item: voice.Item
     source: str  # llm | template
-    characters: int
-    cost_usd: float
-    ttfa_ms: float
-    total_ms: float
+    settings: Settings
 
 
-def payloads(name: str) -> list[dict]:
-    steps = json.loads((SCENARIOS / f"{name}.json").read_text(encoding="utf-8"))["events"]
-    return [s["payload"] for s in steps]
+def first_payload(name: str, step: int = 0) -> dict:
+    data = json.loads((SCENARIOS / f"{name}.json").read_text(encoding="utf-8"))
+    return data["events"][step]["payload"]
 
 
-def render(
-    session: Session,
-    tts: TTSProvider,
-    settings: Settings,
-    site: Site,
-    jobs: list[tuple[str, voice.Item, str]],
-    out: Path,
-) -> list[Row]:
-    """Voice each (file stem, item, script source) and copy its clip to out/<stem>.<ext>."""
-    rows = []
-    for stem, item, source in jobs:
-        [r] = voice.render_many(session, tts, settings, site, [item])
-        if r.error or r.path is None:
-            print(f"  {stem}: FAILED ({r.error})")
-            continue
-        name = f"{stem}{r.path.suffix}"
-        shutil.copyfile(r.path, out / name)
-        rows.append(
-            Row(name, item.language, item.urgency or 1, r.model_id, source,
-                r.characters_billed, r.cost_usd, r.ttfa_ms, r.total_ms)
-        )  # fmt: skip
-        print(f"  {name}: {r.characters_billed} chars, ${r.cost_usd:.4f}, ttfa {r.ttfa_ms:.0f} ms")
-    return rows
-
-
-def script_items(
-    event: EventInput, site: Site, llm, settings: Settings, *, previous=None, resolution=False
-):
-    context = build_context(site, event.type, previous=previous)
+def scripts(event: EventInput, site: Site, llm, settings: Settings):
+    context = build_context(site, event.type)
     plan = generate(event, context, llm, settings, now=timeutil.now())
-    first = context.languages[0]
-    for s in plan.scripts:
-        kind = voice.render_kind(s.urgency, is_resolution=resolution)
-        item = voice.Item(s.spoken_text, s.language, kind, chime=s.language == first,
-                          urgency=s.urgency)  # fmt: skip
-        yield s, item
+    return context.languages[0], plan.scripts
+
+
+def build_jobs(settings: Settings, llm) -> list[Job]:
+    sites = load_sites()
+    airport, tube = sites["airport"], sites["tube_station"]
+    jobs: list[Job] = []
+
+    page = EventInput.of(event_key="b", site_id="airport", payload=first_payload("b_ba117"))
+    first, slots = scripts(page, airport, llm, settings)
+    by_slot = {(s.language, s.urgency): s for s in slots}
+    for lang, urgency in B_SLOTS:
+        s = by_slot[(lang, urgency)]
+        item = voice.Item(s.spoken_text, lang, voice.render_kind(urgency),
+                          chime=lang == first, urgency=urgency)  # fmt: skip
+        jobs.append(Job(f"b_{lang}_u{urgency}", airport, item, s.source, settings))
+
+    en1 = by_slot[("en", 1)]  # the comparison: b_en_u1's speech without the chime, both models
+    live, scheduled = settings.elevenlabs_model_live, settings.elevenlabs_model_scheduled
+    plain = voice.Item(en1.spoken_text, "en", "live", urgency=1)
+    jobs.append(Job(f"compare_b_en_u1_{live}", airport, plain, en1.source, settings))
+    on_v4 = settings.model_copy(update={"elevenlabs_model_live": scheduled})
+    jobs.append(Job(f"compare_b_en_u1_{scheduled}", airport, plain, en1.source, on_v4))
+
+    severe = EventInput.of(event_key="a", site_id="tube_station", payload=first_payload("a_jubilee"))
+    first, slots = scripts(severe, tube, llm, settings)
+    s = next(x for x in slots if (x.language, x.urgency) == ("en", 1))
+    item = voice.Item(s.spoken_text, "en", "live", chime=True, urgency=1)
+    jobs.append(Job("a_v1_en", tube, item, s.source, settings))
+    return jobs
+
+
+def plan(session: Session, tts, jobs: list[Job]) -> list[int]:
+    """Characters each job would bill, in order. Jobs that share settings and site are planned
+    as one batch, so a segment two jobs need is counted once."""
+    out = [0] * len(jobs)
+    groups: dict[tuple[int, str], list[int]] = {}
+    for i, job in enumerate(jobs):
+        groups.setdefault((id(job.settings), job.site.id), []).append(i)
+    for indexes in groups.values():
+        job0 = jobs[indexes[0]]
+        items = [jobs[i].item for i in indexes]
+        for i, chars in zip(indexes, voice.characters_to_bill(
+            session, tts, job0.settings, job0.site, items), strict=True):  # fmt: skip
+            out[i] = chars
+    return out
+
+
+def export(session: Session, out_dir: Path, manifest: dict, done: list[tuple[Job, str]]) -> None:
+    """Add every new real clip to out_dir and the manifest: the clip each job plays under the
+    job's name, then the segments stitched into them under cache/<id>."""
+    known = {c["id"] for c in manifest["clips"]}
+
+    def add(clip: AudioClip, file: str) -> None:
+        src = voice.clip_path(_settings_of(done), clip)
+        (out_dir / file).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, out_dir / file)
+        manifest["clips"].append({
+            "id": clip.id, "file": file, "kind": clip.kind, "permanent": clip.permanent,
+            "provider": clip.provider, "model_id": clip.model_id, "voice_id": clip.voice_id,
+            "language": clip.language, "characters": clip.characters,
+            "cost_usd": round(clip.cost_usd, 6), "duration_s": round(clip.duration_s, 3),
+            "parts": clip.parts,
+        })  # fmt: skip
+        known.add(clip.id)
+
+    for job, clip_id in done:
+        clip = session.get(AudioClip, clip_id)
+        if clip is not None and clip.id not in known:
+            add(clip, f"{job.stem}{Path(clip.path).suffix}")
+    for _, clip_id in done:
+        clip = session.get(AudioClip, clip_id)
+        for part_id in clip.parts if clip else []:
+            part = session.get(AudioClip, part_id)
+            if part is not None and part.id not in known:
+                add(part, f"cache/{part.id}{Path(part.path).suffix}")
+
+
+def _settings_of(done: list[tuple[Job, str]]) -> Settings:
+    return done[0][0].settings  # every job shares one audio_dir
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
+    parser.add_argument("--go", action="store_true", help="render (default: show the plan)")
+    parser.add_argument("--budget", type=int, default=5000, help="characters, all runs together")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args()
     base = get_settings()
     tts, llm = build_tts(base), build_llm(base)
     if tts.mode != "live" and args.out.resolve() == DEFAULT_OUT.resolve():
-        print("TTS is in mock mode: mock WAVs are not samples. Set ELEVENLABS_API_KEY, or --out.")
+        print("TTS is in mock mode: mock audio is not a sample. Set ELEVENLABS_API_KEY, or --out.")
         return 1
     args.out.mkdir(parents=True, exist_ok=True)
-    print(f"LLM {llm.mode}, TTS {tts.mode}; writing to {args.out}")
+    manifest = voice.read_manifest(args.out)
+    spent = sum(run["total"] for run in manifest["ledger"])
+    print(f"LLM {llm.mode}, TTS {tts.mode}; out {args.out}")
 
     with tempfile.TemporaryDirectory() as tmp:
         settings = base.model_copy(update={"audio_dir": f"{tmp}/audio"})
         engine = make_engine(f"sqlite:///{tmp}/samples.db")
         init_db(engine)
-        sites = load_sites()
-        rows: list[Row] = []
         with Session(engine) as session:
-            print("scenario B")
-            airport = sites["airport"]
-            page = EventInput.of(event_key="b", site_id="airport", payload=payloads("b_ba117")[0])
-            b = [(f"b_{s.language}_u{s.urgency}", item, s.source)
-                 for s, item in script_items(page, airport, llm, settings)]  # fmt: skip
-            rows += render(session, tts, settings, airport, b, args.out)
+            voice.seed_cache(session, settings, args.out)
+            jobs = build_jobs(settings, llm)
+            planned = plan(session, tts, jobs)
+            print(f"\n{'clip':<34} {'model':<16} {'chars':>6}")
+            for job, chars in zip(jobs, planned, strict=True):
+                model = voice.route_model(job.item.kind, job.settings)
+                note = "  (cached)" if chars == 0 else ""
+                print(f"{job.stem:<34} {model:<16} {chars:>6}{note}")
+            total = sum(planned)
+            print(f"\nthis run: {total} chars; spent before: {spent}; after: {spent + total} "
+                  f"of {args.budget}")  # fmt: skip
+            if spent + total > args.budget:
+                print("over budget: nothing rendered")
+                return 3
+            if not args.go:
+                print("plan only: run with --go to render")
+                return 0
 
-            print("scenario A")
-            tube = sites["tube_station"]
-            severe, minor, good = payloads("a_jubilee")
-            v1 = EventInput.of(event_key="a", site_id="tube_station", payload=severe)
-            v2 = EventInput.of(event_key="a", site_id="tube_station", payload=minor, version=2)
-            res = EventInput.of(event_key="a", site_id="tube_station", payload=good)
-            first = list(script_items(v1, tube, llm, settings))
-            a = [("a_v1_severe", first[0][1], first[0][0].source)]
-            for s, item in script_items(v2, tube, llm, settings, previous=[first[0][0].draft]):
-                a.append(("a_v2_minor", item, s.source))
-            for s, item in script_items(res, tube, llm, settings, resolution=True):
-                a.append(("a_resolved", item, s.source))
-            rows += render(session, tts, settings, tube, a, args.out)
-
-            print("model comparison: scenario B level 1, same script, no chime")
-            for model in (base.elevenlabs_model_live, base.elevenlabs_model_scheduled):
-                per_model = settings.model_copy(  # own audio dir: a cold render, never a hit
-                    update={"elevenlabs_model_live": model, "audio_dir": f"{tmp}/audio-{model}"}
-                )
-                cmp = [(f"compare_b_{s.language}_u1_{model}", voice.Item(item.text, item.language),
-                        s.source)
-                       for s, item in script_items(page, airport, llm, settings)
-                       if s.urgency == 1]  # fmt: skip
-                rows += render(session, tts, per_model, airport, cmp, args.out)
-
-    write_report(args.out / "report.md", rows, llm.mode, tts.mode)
-    print(f"report: {args.out / 'report.md'}")
+            done, rows = [], []
+            for job in jobs:
+                [r] = voice.render_many(session, tts, job.settings, job.site, [job.item])
+                if r.error or r.clip_id is None:
+                    print(f"  {job.stem}: FAILED ({r.error})")
+                    continue
+                done.append((job, r.clip_id))
+                rows.append({"clip": job.stem, "model": r.model_id, "script": job.source,
+                             "characters": r.characters_billed, "ttfa_ms": round(r.ttfa_ms),
+                             "total_ms": round(r.total_ms)})  # fmt: skip
+                print(f"  {job.stem}: {r.characters_billed} chars, ttfa {r.ttfa_ms:.0f} ms, "
+                      f"total {r.total_ms:.0f} ms")  # fmt: skip
+            run_total = sum(r["characters"] for r in rows)
+            manifest["ledger"].append({"at": datetime.now(UTC).isoformat(timespec="seconds"),
+                                       "what": "render_samples.py", "clips": rows,
+                                       "total": run_total})  # fmt: skip
+            export(session, args.out, manifest, done)
+    (args.out / voice.MANIFEST).write_text(json.dumps(manifest, indent=1) + "\n", "utf-8")
+    write_report(args.out / "report.md", manifest)
+    print(f"\nthis run billed {run_total} chars; total so far {spent + run_total} of {args.budget}")
     return 0
 
 
-def write_report(path: Path, rows: list[Row], llm_mode: str, tts_mode: str) -> None:
+def write_report(path: Path, manifest: dict) -> None:
     lines = [
-        "# Sample clips",
+        "# Sample clips: characters used",
         "",
-        f"Generated by `scripts/render_samples.py` (LLM {llm_mode}, TTS {tts_mode}). Cold cache:",
-        "every clip is a fresh render. TTFA = request start to first audio byte.",
+        "Written by `scripts/render_samples.py` from `manifest.json`. Characters are what",
+        "ElevenLabs bills (counted here as one credit each, an upper bound). TTFA = request start",
+        "to first audio byte; 0 characters means the clip was already in the cache.",
         "",
-        "| File | Lang | Level | Model | Script | Chars | Cost (USD) | TTFA (ms) | Total (ms) |",
-        "|---|---|---|---|---|---|---|---|---|",
     ]
-    for r in rows:
-        lines.append(
-            f"| {r.file} | {r.language} | {r.urgency} | {r.model} | {r.source} | {r.characters} "
-            f"| {r.cost_usd:.4f} | {r.ttfa_ms:.0f} | {r.total_ms:.0f} |"
-        )
-    lines += ["", f"Total: {sum(r.characters for r in rows)} characters, "
-              f"${sum(r.cost_usd for r in rows):.4f}."]  # fmt: skip
+    for run in manifest["ledger"]:
+        lines += [f"## {run['at']}: {run['what']}", ""]
+        if run.get("clips"):
+            lines += ["| Clip | Model | Script | Chars | TTFA (ms) | Total (ms) |",
+                      "|---|---|---|---|---|---|"]  # fmt: skip
+            lines += [f"| {c['clip']} | {c['model']} | {c['script']} | {c['characters']} "
+                      f"| {c['ttfa_ms']} | {c['total_ms']} |" for c in run["clips"]]  # fmt: skip
+            lines.append("")
+        lines += [f"Run total: **{run['total']}** characters.", ""]
+    total = sum(r["total"] for r in manifest["ledger"])
+    lines.append(f"**Total so far: {total} characters.**")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

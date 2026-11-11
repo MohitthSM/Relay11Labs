@@ -1,17 +1,16 @@
 # Sample clips
 
-Not generated yet: the build environment had no ElevenLabs key (PLAN.md Phase 8, "Live verification").
-
-With `ELEVENLABS_API_KEY` (and optionally `ANTHROPIC_API_KEY`) in `.env`:
+Real ElevenLabs audio for the pitch, kept small for a free-tier key. `manifest.json` lists every clip ever rendered (cache id, model, voice, characters) and a ledger of the characters spent per run. `report.md` shows the same as tables.
 
 ```bash
-cd backend && uv run python scripts/render_samples.py
+cd backend && uv run python scripts/render_samples.py         # the plan: characters per clip, no API call
+cd backend && uv run python scripts/render_samples.py --go    # render it, then commit this folder
 ```
 
-This writes the following here:
-- `b_<lang>_u<level>.mp3`: scenario B, the 9 clips.
-- `a_v1_severe.mp3`, `a_v2_minor.mp3`, `a_resolved.mp3`: scenario A.
-- `compare_b_<lang>_u1_<model>.mp3`: the v4 Turbo vs v4 comparison.
-- `report.md`: model, characters, cost, time to first audio and total time per clip.
+The script stops before a run that would pass `--budget` (default 5,000 characters, all runs together).
 
-Commit them with the report.
+**Never paid twice.** The script seeds the cache from this folder before planning, so a committed clip costs 0. The app does the same at start-up when TTS is live (`voice.seed_cache`, `RELAY_SAMPLES_DIR`), so the demo replays these clips for free. In scenario B, the clips not in this set (urgency 2, and ES/FR at urgency 3) would still be rendered by a live run (D4).
+
+Files:
+- `<clip>.mp3`: what a zone plays, chime included where the app adds one.
+- `cache/<id>.mp3`: the segments stitched into them.

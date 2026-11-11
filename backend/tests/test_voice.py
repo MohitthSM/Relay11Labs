@@ -577,3 +577,42 @@ def test_audio_endpoint_serves_clips(engine, tts, vsettings, session):
     assert ok.content == out.path.read_bytes()
     assert client.get("/audio/" + "0" * 64).status_code == 404
     assert client.get("/audio/..%2F..%2Fetc%2Fpasswd").status_code == 404
+
+
+# --- committed clips (docs/samples) ------------------------------------------------------------
+
+
+def test_seeded_clips_are_never_billed_again(session, tts, vsettings, tmp_path, engine):
+    """A clip rendered once and committed (file + manifest entry) costs 0 in a fresh cache."""
+    import json
+    import shutil
+
+    from sqlmodel import Session
+
+    airport = get_site("airport")
+    item = Item("Final call for passenger page here.", "en", chime=True)
+    assert voice.characters_to_bill(session, tts, vsettings, airport, [item]) == [len(item.text)]
+    out = voice.render(session, tts, vsettings, airport, item)
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    clips = []
+    for clip_id in [out.clip_id, *session.get(AudioClip, out.clip_id).parts]:
+        clip = session.get(AudioClip, clip_id)
+        shutil.copyfile(voice.clip_path(vsettings, clip), samples / clip.path)
+        clips.append({"id": clip.id, "file": clip.path, "kind": clip.kind,
+                      "permanent": clip.permanent, "provider": clip.provider,
+                      "model_id": clip.model_id, "voice_id": clip.voice_id,
+                      "language": clip.language, "characters": clip.characters,
+                      "cost_usd": clip.cost_usd, "duration_s": clip.duration_s,
+                      "parts": clip.parts})  # fmt: skip
+    (samples / voice.MANIFEST).write_text(json.dumps({"clips": clips, "ledger": []}))
+
+    fresh = Settings(audio_dir=str(tmp_path / "fresh-audio"))
+    with Session(engine) as other:  # same tables, but the fresh audio dir has no files
+        assert voice.characters_to_bill(other, tts, fresh, airport, [item]) == [len(item.text)]
+        assert voice.seed_cache(other, fresh, samples) == 2  # the stitched clip and its segment
+        assert voice.characters_to_bill(other, tts, fresh, airport, [item]) == [0]
+        before = len(tts.calls)
+        again = voice.render(other, tts, fresh, airport, item)
+        assert again.cache_hit and len(tts.calls) == before
+        assert voice.seed_cache(other, fresh, samples) == 0  # idempotent

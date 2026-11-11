@@ -1,12 +1,14 @@
 """FastAPI app. The lifespan creates the tables and runs the background tasks: the playback
-scheduler, the TfL poller (idle in demo mode), the PII purge (R11) and, with live TTS, a one-off
-warm-up that voices every site's fixed opening and closing phrases (D18) before they are needed.
+scheduler, the TfL poller (idle in demo mode) and the PII purge (R11). With live TTS it also seeds
+the audio cache from the committed real clips (docs/samples) and, if RELAY_WARM_SEGMENTS is on,
+voices every site's fixed opening and closing phrases (D18) before they are needed.
 """
 
 import asyncio
 import contextlib
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from sqlmodel import Session
@@ -54,12 +56,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_db(db)
+        if ctx.conns.tts.mode == "live":  # mock audio has other cache keys: nothing to seed
+            with Session(db) as session:
+                seeded = voice.seed_cache(session, settings, Path(settings.relay_samples_dir))
+            log.info("audio cache: %d committed clips seeded", seeded)
         tasks = [
             asyncio.create_task(scheduler.run(ctx, playback)),
             asyncio.create_task(tfl.run(ctx, feed)),  # idle until the mode is live
             asyncio.create_task(purge.run(ctx)),
         ]
-        if ctx.conns.tts.mode == "live":  # mock audio costs nothing and needs no warm-up
+        if ctx.conns.tts.mode == "live" and settings.relay_warm_segments:  # costs characters
             tasks.append(asyncio.create_task(asyncio.to_thread(warm_segments, ctx)))
         yield
         for task in tasks:

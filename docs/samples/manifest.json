@@ -1,0 +1,20 @@
+{
+ "clips": [],
+ "ledger": [
+  {
+   "at": "2026-11-11T16:40:00+00:00",
+   "what": "pytest -m live: test_one_clip_from_elevenlabs (clip in a temp dir, not kept)",
+   "clips": [
+    {
+     "clip": "smoke: 'Customer information.' + 'Holborn and Marylebone are open.'",
+     "model": "eleven_v4_turbo",
+     "script": "test",
+     "characters": 53,
+     "ttfa_ms": 0,
+     "total_ms": 0
+    }
+   ],
+   "total": 53
+  }
+ ]
+}

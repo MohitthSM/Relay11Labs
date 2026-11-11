@@ -11,6 +11,7 @@ services:
       AUDIO_DIR: data/audio
     volumes:
       - relay-data:/app/backend/data   # SQLite + audio cache survive restarts
+      - ./docs/samples:/app/docs/samples:ro   # committed real clips, seeded into the cache
     ports:
       - "8000:8000"                    # the API directly (curl, make demo-a)
 

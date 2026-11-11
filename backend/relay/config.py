@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Cut fixed openings/closings off scripts and voice them once (D18). Off: every announcement
     # is voiced whole, so it is one clip per announcement and nothing is stitched but the chime.
     voice_split_segments: bool = True
+    # Live TTS only. Warm-up voices every site's fixed phrases at start-up (costs characters once,
+    # about 260 for the shipped sites); off by default so a free-tier key is never spent unasked.
+    relay_warm_segments: bool = False
+    # Committed real clips (docs/samples/manifest.json) are seeded into the cache at start-up, so
+    # the demo replays them at zero cost. Relative to the backend directory.
+    relay_samples_dir: str = "../docs/samples"
 
     prompts_dir: str = "prompts"
 

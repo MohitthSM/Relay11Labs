@@ -146,7 +146,8 @@ export type Announcement = {
   audio_error: string | null;
 };
 
-export type EventState = "active" | "superseded" | "resolved";
+// withdrawn: stopped with no resolution message (TfL events when the source switches to demo)
+export type EventState = "active" | "superseded" | "resolved" | "withdrawn";
 
 export type RelayEvent = {
   id: number;
@@ -183,7 +184,7 @@ export type ScenarioList = { speed: number; scenarios: ScenarioInfo[] };
 export type RunStatus = {
   run_id: string;
   scenario: string;
-  state: "running" | "done" | "failed";
+  state: "running" | "done" | "failed" | "stopped"; // stopped: the source switched to live
   steps_done: number;
   steps_total: number;
   error: string | null;
@@ -237,13 +238,15 @@ export type SourceStatus = {
   poll_s: number;
   app_key: boolean;
   flights: "mock" | "live";
+  withdrawn?: number; // PUT /source only: TfL events withdrawn by a switch to demo
 };
 
 export type StateMessage =
   | ({ type: "source" } & Omit<SourceStatus, "flights">)
   | { type: "snapshot"; active: { event_id: number; site_id: string; event_type: string; version: number }[] }
   | {
-      type: "event.created" | "event.updated" | "event.resolved" | "event.approved";
+      // event.audio: the later urgency levels have been voiced in the background
+      type: "event.created" | "event.updated" | "event.resolved" | "event.approved" | "event.withdrawn" | "event.audio";
       event_id: number;
       site_id: string;
       event_type: string;

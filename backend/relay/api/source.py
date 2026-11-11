@@ -2,7 +2,8 @@
 
 GET /source        mode, feed status (off | waiting | ok | error | stale), a warning if the data
                    is not fresh, the lines being tracked, and the flight feed's provider
-PUT /source        {"mode": "demo" | "live"}
+PUT /source        {"mode": "demo" | "live"}; switching to demo withdraws active TfL events
+                   and answers how many ("withdrawn")
 GET /flights       the departures the (mock) flight feed knows about
 Changes are also pushed on the WebSocket as {"type": "source", ...} (D8).
 """
@@ -34,8 +35,8 @@ def build_router(ctx: Context, feed: tfl.FeedState, flights: FlightFeed) -> APIR
 
     @router.put("/source")
     def put_source(body: SourceBody) -> dict:
-        tfl.set_mode(feed, body.mode)
-        out = status()
+        withdrawn = tfl.set_mode(ctx, feed, body.mode)
+        out = {**status(), "withdrawn": withdrawn}
         bus.publish({"type": "source", **out})
         return out
 

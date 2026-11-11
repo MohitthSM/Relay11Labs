@@ -63,8 +63,9 @@ class VoiceRender(SQLModel, table=True):
     created_at: datetime = Field(default_factory=timeutil.now)
 
 
-# Event states
-ACTIVE, SUPERSEDED, RESOLVED = "active", "superseded", "resolved"
+# Event states. withdrawn: stopped without a resolution message because Relay stopped listening
+# to its source (a TfL event when the console switches to demo mode), not because it ended.
+ACTIVE, SUPERSEDED, RESOLVED, WITHDRAWN = "active", "superseded", "resolved", "withdrawn"
 # Approval states
 AUTO, PENDING, APPROVED = "auto", "pending", "approved"
 # Playback job states
@@ -84,7 +85,7 @@ class Event(SQLModel, table=True):
     payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))  # the facts
     source: str = "api"  # form | staff_note | tfl | replay | api
     staff_note: str | None = None
-    state: str = Field(default=ACTIVE, index=True)  # active | superseded | resolved
+    state: str = Field(default=ACTIVE, index=True)  # active | superseded | resolved | withdrawn
     priority: int = 30  # rank of the policy's priority class (sites.PRIORITY)
     created_at: datetime = Field(default_factory=timeutil.now)
     resolved_at: datetime | None = None

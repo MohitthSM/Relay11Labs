@@ -95,6 +95,16 @@ class EventInput(BaseModel):
     def type(self) -> str:
         return self.payload.type
 
+    @classmethod
+    def of(
+        cls, *, event_key: str, site_id: str, payload: dict[str, Any], version: int = 1
+    ) -> "EventInput":
+        """Validate a raw payload dict (raises ValidationError). The typed constructor wants a
+        payload model, so dicts from the API and the database come in through here."""
+        return cls.model_validate(
+            {"event_key": event_key, "site_id": site_id, "version": version, "payload": payload}
+        )
+
     def facts(self) -> dict[str, Any]:
         """All facts present in this event: payload facts (not None) plus derived facts."""
         out = {

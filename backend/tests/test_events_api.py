@@ -5,6 +5,7 @@ import time
 import pytest
 from sqlmodel import Session, select
 
+from relay import background
 from relay.models import Announcement, AudioClip, Event, LLMCall, VoiceRender
 
 JUBILEE = {
@@ -46,6 +47,10 @@ def test_scenario_b_from_post_to_playable_audio(client, engine, settings):
     assert {(a["language"], a["urgency"]) for a in anns} == {
         (lang, u) for lang in ("en", "es", "fr") for u in (1, 2, 3)
     }
+    # level 1 is voiced before the event is created; levels 2 and 3 in the background
+    assert all(a["audio_url"] for a in anns if a["urgency"] == 1)
+    assert background.wait(10)
+    anns = client.get(f"/events/{ev['id']}").json()["announcements"]
     assert all(a["audio_url"] and a["audio_error"] is None for a in anns)
     assert all(a["source"] == "template" or a["source"] == "llm" for a in anns)
     assert "John Smith" in next(a for a in anns if a["language"] == "en")["script"]
@@ -159,7 +164,9 @@ def test_tts_failure_is_not_a_500(client, app):
 
 def test_llm_failure_falls_back_to_templates(client, app):
     app.state.ctx.conns.llm.failures.fail_next(5, retryable=False)
-    anns = post(client, "airport", PAGE).json()["announcements"]
+    ev = post(client, "airport", PAGE).json()
+    assert background.wait(10)
+    anns = client.get(f"/events/{ev['id']}").json()["announcements"]
     assert len(anns) == 9 and {a["source"] for a in anns} == {"template"}
     assert all(a["audio_url"] for a in anns)
 

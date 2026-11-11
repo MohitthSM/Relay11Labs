@@ -1,8 +1,8 @@
 id: tube_station
 name: Canary Wharf Underground station
 hub_type: underground
-voice_id: JBFqnCBsd6RMkjVDRZzb   # PLACEHOLDER: a stock ElevenLabs voice taken from the API docs example.
-                              # Listen in EN/ES/FR and replace before the pitch (PLAN open items).
+voice_id: JBFqnCBsd6RMkjVDRZzb   # George (premade): British, verified EN/ES/FR, approved by ear
+                              # (Phase 8, ARCHITECTURE section 7). Default voices retire 2026-12-31: re-check.
 voice_settings: {}      # optional: stability, similarity_boost, style, speed
 style_guide: |
   Calm, plain and brief. Open disruption messages with "Customer information."

@@ -1,5 +1,6 @@
 """Script engine: routing, retry with feedback, template fallback, escalation, all scenarios."""
 
+import dataclasses
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -300,3 +301,38 @@ def test_scenario_c_announcement_matches_spec(settings):
         "Please go to Stand F."
     )
     assert plan.expires_at == NOW + timedelta(minutes=20) and plan.repeat_interval_s == 180
+
+
+# --- an announcement links to the LLM call that wrote it --------------------------------------
+
+
+class _ServedAs(MockLLMProvider):
+    """Reports a different model string than requested (as a server-side fallback would), and
+    invents a fact on its first call only, so the last slot is written by attempt 2."""
+
+    def generate_scripts(self, req, model):
+        self.hallucinate = not self.calls
+        result = super().generate_scripts(req, model)
+        return dataclasses.replace(result, model=model + "-served")
+
+
+def test_announcement_links_to_its_call_by_attempt_not_model_name(settings, engine):
+    from sqlmodel import Session, select
+
+    from relay import events as events_service
+    from relay.context import Context
+    from relay.models import Announcement, LLMCall
+    from relay.providers import Connectors
+    from relay.providers.tts_mock import MockTTSProvider
+
+    same = settings.model_copy(update={"script_model_escalation": settings.script_model_default})
+    ctx = Context(Connectors(llm=_ServedAs(), tts=MockTTSProvider()), same, engine)
+    page = {"type": "passenger_page", "passenger_name": "John Smith", "flight_number": "BA117",
+            "destination": "New York", "gate": "23", "page_type": "final_call"}  # fmt: skip
+    with Session(engine) as s:
+        event = events_service.create(s, ctx, site_id="airport", payload=page)
+        calls = {c.id: c for c in s.exec(select(LLMCall).where(LLMCall.event_id == event.id))}
+        anns = s.exec(select(Announcement).where(Announcement.event_id == event.id)).all()
+    assert all(a.source == "llm" and a.llm_call_id in calls for a in anns)
+    attempts = sorted(calls[a.llm_call_id].attempt for a in anns if a.llm_call_id)
+    assert attempts == [1] * 8 + [2]  # the slot the first call got wrong came from attempt 2

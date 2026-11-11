@@ -1,0 +1,27 @@
+# One command: `docker compose up --build`, then open http://localhost:8080.
+# With no .env (or empty keys) everything runs in mock mode (D13). Put keys in .env to go live.
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      RELAY_DB_URL: sqlite:///data/relay.db
+      AUDIO_DIR: data/audio
+    volumes:
+      - relay-data:/app/backend/data   # SQLite + audio cache survive restarts
+      - ./docs/samples:/app/docs/samples:ro   # committed real clips, seeded into the cache
+    ports:
+      - "8000:8000"                    # the API directly (curl, make demo-a)
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+
+volumes:
+  relay-data:

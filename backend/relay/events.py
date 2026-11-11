@@ -1,9 +1,15 @@
 """Events service: create, versioned update, resolve. Orchestrates script -> voice.
 
 One call does the whole path (SPEC F1):
-  validate -> Event row -> script engine (writes LLMCall + Announcement rows)
-  -> voice.render_many (clips) -> playback jobs (jobs.py) -> state-change message on the bus.
+  validate -> Event row -> script engine (writes LLMCall + Announcement rows, every level)
+  -> voice the first urgency level, every language -> playback jobs (jobs.py)
+  -> state-change message on the bus -> the later levels are voiced in the background.
 The scheduler (scheduler.py) plays the jobs; nothing here plays audio.
+
+First play waits only for the first level (D4, amended in Phase 8): a level-2 or level-3 clip
+plays minutes later, so it is voiced after the event is committed (`voice_later`, one background
+thread, lowest level first). If a level is not ready when its play is due, the scheduler replays
+the level below and logs it.
 
 Replace, never stack (D21): an identical event is a duplicate and changes nothing; an update
 cancels the previous version's jobs before the new version's are created; resolve cancels them.
@@ -18,9 +24,18 @@ from typing import Any
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
-from relay import bus, jobs, timeutil, voice
+from relay import background, bus, jobs, timeutil, voice
 from relay.context import Context
-from relay.models import ACTIVE, PENDING, RESOLVED, SUPERSEDED, Announcement, Event, LLMCall
+from relay.models import (
+    ACTIVE,
+    PENDING,
+    RESOLVED,
+    SUPERSEDED,
+    WITHDRAWN,
+    Announcement,
+    Event,
+    LLMCall,
+)
 from relay.schemas import EventInput, LinePayload, PassengerPagePayload, StandChangePayload
 from relay.script.engine import ScriptPlan, build_context, generate
 from relay.sites import Site, load_sites
@@ -69,7 +84,7 @@ def active_event(session: Session, event_key: str) -> Event | None:
 def find_duplicate(session: Session, site_id: str, payload: dict[str, Any]) -> Event | None:
     """The active event at this site with exactly these facts, if any (D21). A bad payload
     raises ValidationError."""
-    probe = EventInput(event_key="-", site_id=site_id, payload=payload)  # type: ignore[arg-type]
+    probe = EventInput.of(event_key="-", site_id=site_id, payload=payload)
     facts = probe.payload.model_dump()
     rows = session.exec(
         select(Event).where(
@@ -91,7 +106,7 @@ def create(
 ) -> Event:
     """Version 1 of a new event. A bad payload raises ValidationError (the API answers 422).
     An event identical to an active one is a duplicate: the active one is returned unchanged."""
-    probe = EventInput(event_key=event_key or "-", site_id=site_id, payload=payload)  # type: ignore[arg-type]
+    probe = EventInput.of(event_key=event_key or "-", site_id=site_id, payload=payload)
     site = get_site_for(site_id, probe.type)
     duplicate = find_duplicate(session, site_id, payload)
     if duplicate:
@@ -111,7 +126,7 @@ def update(
     current = active_event(session, event_key)
     if current is None:
         raise EventError(404, "no active event with this key")
-    probe = EventInput(event_key=event_key, site_id=current.site_id, payload=payload)  # type: ignore[arg-type]
+    probe = EventInput.of(event_key=event_key, site_id=current.site_id, payload=payload)
     if probe.type != current.type:
         raise EventError(422, "an update cannot change the event type")
     site = get_site_for(current.site_id, current.type)
@@ -148,13 +163,30 @@ def resolve(
         wanted = {**wanted, "status": "good_service"}
         if payload and payload.get("status") not in (None, "good_service"):
             raise EventError(422, "a line is resolved with status good_service")
-        res = EventInput(event_key=event_key, site_id=event.site_id, payload=wanted)  # type: ignore[arg-type]
+        res = EventInput.of(event_key=event_key, site_id=event.site_id, payload=wanted)
         _announce(session, ctx, site, event, res, is_resolution=True)
         jobs.schedule_event(session, event, site, now, resolution=True)
     session.commit()
     session.refresh(event)
     _publish("event.resolved", event)
     log.info("event %s resolved", event.id)
+    return event
+
+
+def withdraw(session: Session, event: Event) -> Event:
+    """Stop an active event silently: its jobs are cancelled and no resolution message is made.
+    Used when Relay stops listening to the event's source (D23): the situation did not end, so
+    saying "good service has resumed" would be a false statement. Commits."""
+    assert event.id is not None
+    if event.state != ACTIVE:
+        raise EventError(409, "only an active event can be withdrawn")
+    event.state, event.resolved_at = WITHDRAWN, timeutil.now()
+    session.add(event)
+    jobs.cancel_jobs(session, event.id)
+    session.commit()
+    session.refresh(event)
+    _publish("event.withdrawn", event)
+    log.info("event %s withdrawn", event.id)
     return event
 
 
@@ -199,12 +231,14 @@ def _new_version(
     )
     session.add(event)
     session.flush()  # the id is needed for the child rows
-    ev_input = EventInput(event_key=key, site_id=site.id, version=version, payload=payload)  # type: ignore[arg-type]
-    _announce(session, ctx, site, event, ev_input, previous=previous or [])
+    ev_input = EventInput.of(event_key=key, site_id=site.id, version=version, payload=payload)
+    later = _announce(session, ctx, site, event, ev_input, previous=previous or [])
     jobs.schedule_event(session, event, site, timeutil.now())
     session.commit()
     session.refresh(event)
     _publish("event.created" if version == 1 else "event.updated", event)
+    if later:
+        background.submit(voice_later, ctx, event.id)
     log.info("event %s v%d (%s) at %s", event.id, version, event.type, site.id)
     return event
 
@@ -219,12 +253,30 @@ def _announce(
     previous: list[str] | None = None,
     is_resolution: bool = False,
 ) -> list[Announcement]:
-    """Script engine -> LLMCall and Announcement rows -> voice -> clip ids on the announcements."""
+    """Script engine -> LLMCall and Announcement rows (every level) -> voice the first level.
+    Returns the announcements of the later levels, still to be voiced (`voice_later`)."""
     assert event.id is not None
     context = build_context(site, ev_input.type, previous=previous)
     plan = generate(ev_input, context, ctx.conns.llm, ctx.settings, now=timeutil.now())
     announcements = _persist_plan(session, event.id, plan, is_resolution)
-    first_language = context.languages[0]
+    first_level = min(a.urgency for a in announcements)
+    now = [a for a in announcements if a.urgency == first_level]
+    _voice(session, ctx, site, event, now, is_resolution=is_resolution)
+    return [a for a in announcements if a.urgency != first_level]
+
+
+def _voice(
+    session: Session,
+    ctx: Context,
+    site: Site,
+    event: Event,
+    announcements: list[Announcement],
+    *,
+    is_resolution: bool = False,
+) -> None:
+    """Voice these announcements and put their clip ids (or the error) on them. No commit."""
+    assert event.id is not None
+    first_language = site.languages_for(event.type)[0]
     items = [
         voice.Item(
             text=a.spoken_text,
@@ -242,7 +294,42 @@ def _announce(
         ann.clip_id = result.clip_id
         ann.audio_error = None if result.error is None else f"{result.error.kind}: {result.error}"
         session.add(ann)
-    return announcements
+
+
+def voice_later(ctx: Context, event_id: int) -> int:
+    """Background: voice an event version's later urgency levels, lowest level first, so the
+    next play's level is ready first. Stops as soon as the version is no longer active (an
+    update or resolve made it obsolete): no characters are spent on audio that will never play.
+    Returns the number of announcements voiced."""
+    done = 0
+    with Session(ctx.engine) as session:
+        event = session.get(Event, event_id)
+        if event is None:
+            return 0
+        site = get_site_for(event.site_id, event.type)
+        waiting = session.exec(
+            select(Announcement).where(
+                Announcement.event_id == event_id,
+                col(Announcement.is_resolution).is_(False),
+                col(Announcement.clip_id).is_(None),
+                col(Announcement.audio_error).is_(None),
+            )
+        ).all()
+        for level in sorted({a.urgency for a in waiting}):
+            session.refresh(event)
+            if event.state != ACTIVE:
+                log.info(
+                    "event %s no longer active: level %d and above not voiced", event_id, level
+                )
+                break
+            batch = [a for a in waiting if a.urgency == level]
+            _voice(session, ctx, site, event, batch)
+            session.commit()
+            done += len(batch)
+            log.info("event %s: level %d voiced in the background", event_id, level)
+        if done:
+            _publish("event.audio", event)  # the console re-fetches and shows the new clips
+    return done
 
 
 def _persist_plan(
@@ -256,7 +343,9 @@ def _persist_plan(
     session.flush()
     rows = []
     for slot in plan.scripts:
-        accepted = next((c for c in calls if slot.model and c.model == slot.model), None)
+        # by attempt, not model name: the API may report a different model string than the one
+        # requested (server-side fallback), and both attempts may be configured on one model
+        accepted = next((c for c in calls if slot.attempt and c.attempt == slot.attempt), None)
         ann = Announcement(
             event_id=event_id,
             language=slot.language,

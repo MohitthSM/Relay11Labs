@@ -223,9 +223,10 @@ def advance(next_at: datetime, interval_s: int, now: datetime) -> datetime:
 def sequence(session: Session, job: PlaybackJob) -> tuple[int, list[int], list[Clip]]:
     """The urgency level to play and its clips, one per zone language, in the zone's order.
 
-    Escalating jobs play level min(plays_done + 1, 3); others level 1. A language without that
-    level falls back to its highest level below it. An announcement whose audio failed is left
-    out (its text is still in the console).
+    Escalating jobs play level min(plays_done + 1, 3); others level 1. A language without a
+    voiced clip at that level replays its highest voiced level below it: the later levels are
+    voiced in the background (events.voice_later), and a play never waits for them. That is
+    logged. A language with no voiced clip at all is left out (its text is still in the console).
     """
     urgency = min(job.plays_done + 1, 3) if job.escalate else 1
     rows = session.exec(
@@ -237,14 +238,26 @@ def sequence(session: Session, job: PlaybackJob) -> tuple[int, list[int], list[C
     announcement_ids, clips = [], []
     for language in job.languages:
         options = [a for a in rows if a.language == language and a.urgency <= urgency]
-        if not options:
+        voiced = [
+            (a, clip)
+            for a in options
+            if a.clip_id and (clip := session.get(AudioClip, a.clip_id)) is not None
+        ]
+        if not voiced:
+            if options:  # the audit log still says which announcement was due
+                due = max(options, key=lambda a: a.urgency)
+                assert due.id is not None
+                announcement_ids.append(due.id)
             continue
-        ann = max(options, key=lambda a: a.urgency)
+        ann, clip = max(voiced, key=lambda pair: pair[0].urgency)
+        if ann.urgency < urgency:
+            log.warning(
+                "event %s zone %s %s: level %d not voiced yet, replaying level %d",
+                job.event_id, job.zone_id, language, urgency, ann.urgency,
+            )  # fmt: skip
         assert ann.id is not None
         announcement_ids.append(ann.id)
-        clip = session.get(AudioClip, ann.clip_id) if ann.clip_id else None
-        if clip:
-            clips.append(Clip(ann.id, clip.id, language, clip.duration_s))
+        clips.append(Clip(ann.id, clip.id, language, clip.duration_s))
     return urgency, announcement_ids, clips
 
 
@@ -304,6 +317,7 @@ def start_log(session: Session, play: Play, zone_id: str, now: datetime) -> Play
             {
                 "announcement_id": ann_id,
                 "language": ann.language,
+                "urgency": ann.urgency,  # the level that played: below the play's if not ready
                 "source": ann.source,
                 "model": ann.model,
                 "prompt_version": call.prompt_version if call else None,

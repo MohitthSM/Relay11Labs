@@ -37,6 +37,7 @@ from relay.providers.tts_base import (
     DictionarySync,
     RenderRequest,
     TTSResult,
+    VoiceInfo,
     audio_duration,
 )
 
@@ -103,6 +104,32 @@ class ElevenLabsProvider:
             version_id = res.version_id
         action = "updated" if added or removed else "unchanged"
         return DictionarySync(action, existing_id, version_id, added, removed)
+
+    def list_voices(self) -> list[VoiceInfo]:
+        """GET /v2/voices, every page. Read-only; costs no characters."""
+        out: list[VoiceInfo] = []
+        token: str | None = None
+        while True:
+            page = _call(
+                lambda token=token: self.client.voices.search(page_size=100, next_page_token=token)
+            )
+            out += [_voice_info(v) for v in page.voices]
+            if not page.has_more or not page.next_page_token:
+                return out
+            token = page.next_page_token
+
+
+def _voice_info(v: Any) -> VoiceInfo:
+    languages = {lang.language for lang in (v.verified_languages or []) if lang.language}
+    return VoiceInfo(
+        voice_id=v.voice_id,
+        name=v.name or "",
+        category=str(v.category or ""),
+        labels={str(k): str(val) for k, val in (v.labels or {}).items()},
+        description=v.description or "",
+        languages=tuple(sorted(languages)),
+        legacy=bool(v.is_legacy),
+    )
 
 
 def _convert_kwargs(req: RenderRequest) -> dict[str, Any]:

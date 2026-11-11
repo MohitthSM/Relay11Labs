@@ -13,6 +13,7 @@ from relay.providers.tts_base import (
     DictionarySync,
     RenderRequest,
     TTSResult,
+    VoiceInfo,
 )
 
 RATE = 8000
@@ -60,3 +61,14 @@ class MockTTSProvider:
             return DictionarySync("unchanged", existing_id, f"v{version}")
         self.dictionaries[existing_id] = (version + 1, list(rules))
         return DictionarySync("updated", existing_id, f"v{version + 1}", added, removed)
+
+    def list_voices(self) -> list[VoiceInfo]:
+        """Two made-up voices, enough to exercise scripts/pick_voice.py without a key."""
+        return [
+            VoiceInfo("mock-announcer", "Mock Announcer", "premade",
+                      {"accent": "british", "use_case": "informative_educational"},
+                      "Clear, calm announcer", ("en", "es", "fr")),
+            VoiceInfo("mock-character", "Mock Character", "premade",
+                      {"accent": "american", "use_case": "characters_animation"},
+                      "Playful", ("en",), legacy=True),
+        ]  # fmt: skip

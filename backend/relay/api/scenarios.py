@@ -61,7 +61,7 @@ def build_router(ctx: Context, feed: tfl.FeedState) -> APIRouter:
             timeutil.set_scale(speed)
         status = replay.RunStatus(run_id=uuid4().hex[:12], scenario=name)
         runs[status.run_id] = status
-        task = asyncio.create_task(replay.run(ctx, scenario, status, auto_approve))
+        task = asyncio.create_task(replay.run(ctx, scenario, status, feed, auto_approve))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         return status

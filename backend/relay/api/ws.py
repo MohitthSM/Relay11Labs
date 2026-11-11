@@ -1,8 +1,11 @@
 """WebSocket /ws/events: the one real-time channel (D8). Everything the bus publishes goes here.
 
 On connect the client gets a snapshot of the active events, then one small message per change:
-  event.created | event.updated | event.resolved | event.approved   (console state changes)
-  play                                                             (scheduler: one clip in one zone)
+  event.created | event.updated | event.resolved | event.approved | event.withdrawn
+  event.audio                                        (console state changes; event.audio: the
+                                                     later urgency levels are now voiced)
+  play                                               (scheduler: one clip in one zone)
+  source                                             (data source: demo/live, TfL feed status)
 Ids, urls and state only, never names: the client re-fetches details (captions included) over HTTP.
 Each client filters what it needs (the console listens to event.*, the zone players to play).
 """

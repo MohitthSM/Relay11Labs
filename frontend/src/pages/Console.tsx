@@ -74,7 +74,7 @@ export default function Console({ events, sites, zones, activity, now, onApprove
                     <span className="mr-2 font-mono text-[10px] text-dim">#{e.id}</span>
                     {headline(e)} <span className="text-dim">{detail(e)}</span>
                   </span>
-                  <Tag tone="ok">resolved</Tag>
+                  <Tag tone={e.state === "withdrawn" ? "dim" : "ok"}>{e.state}</Tag>
                 </li>
               ))}
             </ul>

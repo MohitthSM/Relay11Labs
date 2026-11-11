@@ -74,7 +74,8 @@ class ScriptSlot(BaseModel):
     text: str  # placeholders filled: what the fact lock approved
     spoken_text: str  # after normalize.py: what goes to TTS
     source: Literal["llm", "template"]
-    model: str | None = None  # model that wrote an accepted LLM script
+    model: str | None = None  # model that wrote an accepted LLM script (as the API reported it)
+    attempt: int | None = None  # the LLM attempt that wrote it: links it to its LLMCall row
     facts_used: list[str]
     rejections: list[Rejection] = Field(default_factory=list)
 
@@ -187,7 +188,7 @@ def generate(
                 )
             else:
                 assert draft is not None
-                accepted[slot] = _slot(draft, slot, event.type, facts, "llm", result.model)
+                accepted[slot] = _slot(draft, slot, event.type, facts, "llm", result.model, attempt)
         if failed and rec.outcome == "accepted":
             rec.outcome = "rejected"
         rec.violations = {slot_key(*s): [str(v) for v in vs] for s, vs in failed.items()}
@@ -246,6 +247,7 @@ def _slot(
     facts: dict,
     source: Literal["llm", "template"],
     model: str | None,
+    attempt: int | None = None,
 ) -> ScriptSlot:
     lang, urgency = slot
     text = templates.fill(draft, facts)
@@ -257,6 +259,7 @@ def _slot(
         spoken_text=spoken_text(text),
         source=source,
         model=model,
+        attempt=attempt,
         facts_used=facts_used(draft, event_type, facts, lang),
     )
 

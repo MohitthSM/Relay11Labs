@@ -1,8 +1,8 @@
 id: airport
 name: Terminal 5, Concourse B
 hub_type: airport
-voice_id: JBFqnCBsd6RMkjVDRZzb   # PLACEHOLDER: a stock ElevenLabs voice taken from the API docs example.
-                              # Listen in EN/ES/FR and replace before the pitch (PLAN open items).
+voice_id: JBFqnCBsd6RMkjVDRZzb   # George (premade): British, verified EN/ES/FR, approved by ear
+                              # (Phase 8, ARCHITECTURE section 7). Default voices retire 2026-12-31: re-check.
 voice_settings: {}      # optional: stability, similarity_boost, style, speed
 style_guide: |
   Courteous and clear, then firmer as urgency rises. Address the passenger by full name.

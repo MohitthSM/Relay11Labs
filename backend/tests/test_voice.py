@@ -509,6 +509,29 @@ def tts_failing() -> MockTTSProvider:
     return t
 
 
+def test_unexpected_provider_exception_fails_one_clip_not_the_batch(session, vsettings):
+    class Broken(MockTTSProvider):
+        def synthesize(self, req):
+            if "bad" in req.text:
+                raise KeyError("an SDK change the provider does not map")
+            return super().synthesize(req)
+
+    items = [Item("A bad one here.", "en"), Item("A good one here.", "en")]
+    out = voice.render_many(session, Broken(), vsettings, get_site("airport"), items)
+    assert isinstance(out[0].error, ProviderError) and out[0].clip_id is None
+    assert out[1].clip_id and out[1].error is None
+
+
+def test_stitch_failure_comes_back_as_an_error(session, tts, vsettings, monkeypatch):
+    def no_ffmpeg(*args, **kwargs):
+        raise FileNotFoundError("ffmpeg")
+
+    monkeypatch.setattr(voice, "stitch", no_ffmpeg)
+    out = voice.render_many(session, tts, vsettings, get_site("airport"),
+                            [Item("Chimed line here.", "en", chime=True)])  # fmt: skip
+    assert out[0].error is not None and "stitch" in str(out[0].error)
+
+
 def test_empty_text_is_refused(session, tts, vsettings, tube):
     with pytest.raises(ValueError):
         voice.render(session, tts, vsettings, tube, Item("  ", "en"))
@@ -554,3 +577,42 @@ def test_audio_endpoint_serves_clips(engine, tts, vsettings, session):
     assert ok.content == out.path.read_bytes()
     assert client.get("/audio/" + "0" * 64).status_code == 404
     assert client.get("/audio/..%2F..%2Fetc%2Fpasswd").status_code == 404
+
+
+# --- committed clips (docs/samples) ------------------------------------------------------------
+
+
+def test_seeded_clips_are_never_billed_again(session, tts, vsettings, tmp_path, engine):
+    """A clip rendered once and committed (file + manifest entry) costs 0 in a fresh cache."""
+    import json
+    import shutil
+
+    from sqlmodel import Session
+
+    airport = get_site("airport")
+    item = Item("Final call for passenger page here.", "en", chime=True)
+    assert voice.characters_to_bill(session, tts, vsettings, airport, [item]) == [len(item.text)]
+    out = voice.render(session, tts, vsettings, airport, item)
+    samples = tmp_path / "samples"
+    samples.mkdir()
+    clips = []
+    for clip_id in [out.clip_id, *session.get(AudioClip, out.clip_id).parts]:
+        clip = session.get(AudioClip, clip_id)
+        shutil.copyfile(voice.clip_path(vsettings, clip), samples / clip.path)
+        clips.append({"id": clip.id, "file": clip.path, "kind": clip.kind,
+                      "permanent": clip.permanent, "provider": clip.provider,
+                      "model_id": clip.model_id, "voice_id": clip.voice_id,
+                      "language": clip.language, "characters": clip.characters,
+                      "cost_usd": clip.cost_usd, "duration_s": clip.duration_s,
+                      "parts": clip.parts})  # fmt: skip
+    (samples / voice.MANIFEST).write_text(json.dumps({"clips": clips, "ledger": []}))
+
+    fresh = Settings(audio_dir=str(tmp_path / "fresh-audio"))
+    with Session(engine) as other:  # same tables, but the fresh audio dir has no files
+        assert voice.characters_to_bill(other, tts, fresh, airport, [item]) == [len(item.text)]
+        assert voice.seed_cache(other, fresh, samples) == 2  # the stitched clip and its segment
+        assert voice.characters_to_bill(other, tts, fresh, airport, [item]) == [0]
+        before = len(tts.calls)
+        again = voice.render(other, tts, fresh, airport, item)
+        assert again.cache_hit and len(tts.calls) == before
+        assert voice.seed_cache(other, fresh, samples) == 0  # idempotent

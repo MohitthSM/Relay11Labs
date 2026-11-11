@@ -4,6 +4,7 @@ import time
 
 from sqlmodel import Session, select
 
+from relay import background
 from relay.models import Announcement, Event
 
 
@@ -50,6 +51,7 @@ def test_scenario_a_update_supersedes_then_resolves(client, engine):
 
 def test_scenario_b_nine_clips_all_playable(client):
     assert run_scenario(client, "b_ba117")["state"] == "done"
+    assert background.wait(10)  # levels 2 and 3 are voiced after the event is created
     ev = client.get("/events", params={"state": "active"}).json()[0]
     anns = client.get(f"/events/{ev['id']}").json()["announcements"]
     assert len(anns) == 9

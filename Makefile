@@ -1,9 +1,11 @@
-.PHONY: setup dev test lint fmt sync-pronunciations demo-a demo-b demo-c
+.PHONY: setup dev up test lint fmt sync-pronunciations demo-a demo-b demo-c
 setup:
 	cd backend && uv sync
 	cd frontend && npm install
 dev:
 	(cd backend && uv run uvicorn relay.main:app --reload --port 8000) & (cd frontend && npm run dev) & wait
+up:
+	docker compose up --build
 test:
 	cd backend && uv run pytest -q
 lint:

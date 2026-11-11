@@ -290,10 +290,10 @@ def test_line_outside_the_gazetteer_is_reported_not_announced(ctx, engine, state
     assert "gazetteer" in state.line_errors["metropolitan"]
 
 
-def test_set_mode_live_polls_at_once(state):
+def test_set_mode_live_polls_at_once(ctx, state):
     state.next_poll = T0 + timedelta(hours=1)
     state.mode = "demo"
-    tfl.set_mode(state, "live")
+    assert tfl.set_mode(ctx, state, "live") == 0
     assert state.mode == "live" and state.next_poll is None
 
 

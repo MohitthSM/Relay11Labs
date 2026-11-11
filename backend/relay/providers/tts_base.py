@@ -70,6 +70,19 @@ class DictionarySync:
     removed: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class VoiceInfo:
+    """A voice the account can use, as the voices API describes it (scripts/pick_voice.py)."""
+
+    voice_id: str
+    name: str
+    category: str  # premade | professional | generated | cloned | ...
+    labels: dict[str, str] = field(default_factory=dict)  # accent, gender, use_case, ...
+    description: str = ""
+    languages: tuple[str, ...] = ()  # ISO 639-1 codes the voice is verified in
+    legacy: bool = False  # being retired (the old default voices end on 2026-12-31)
+
+
 class TTSProvider(Protocol):
     mode: str
 
@@ -79,4 +92,8 @@ class TTSProvider(Protocol):
         self, name: str, rules: list[PronunciationRule], existing_id: str | None
     ) -> DictionarySync:
         """Create the dictionary, or bring an existing one in line with `rules`."""
+        ...
+
+    def list_voices(self) -> list[VoiceInfo]:
+        """Every voice this account can use with text_to_speech."""
         ...

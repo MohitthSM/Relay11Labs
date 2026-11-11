@@ -1,0 +1,12 @@
+{
+  "bus_station": {
+    "dictionary_id": "UoB8Tir8KKVlXsCAs2qS",
+    "version_id": "29i4XiA3rEXKbhT5RQub",
+    "pls_sha256": "de84c7470267e91aa20ddcda7251b714b8ab0eb34c9c90d26d0beab02ca09edb"
+  },
+  "tube_station": {
+    "dictionary_id": "mo8GeMLoasVKy5TSY477",
+    "version_id": "MOMVHYSbINHnGjYWS5LI",
+    "pls_sha256": "a2af53e6c49adbaf5608908997159b6f52572bcc609055748ae34bdfe0ed74d7"
+  }
+}

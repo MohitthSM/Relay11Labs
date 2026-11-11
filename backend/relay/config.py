@@ -9,7 +9,8 @@ Mode = Literal["auto", "mock", "live"]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The repo-root .env (docker compose, README) and backend/.env both work; the later file wins.
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
     anthropic_api_key: str = ""
     elevenlabs_api_key: str = ""
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     relay_mock_hallucinate: bool = False  # mock LLM injects one false fact per event (demo)
     relay_time_scale: float = 1.0  # read ONLY by timeutil.py
     relay_db_url: str = "sqlite:///data/relay.db"
+    relay_pii_retention_hours: float = 24.0  # R11: real hours after a page ends (purge.py)
 
     # Real data (Phase 7). Demo mode plays the scripted scenarios; live mode polls TfL.
     relay_data_mode: Literal["demo", "live"] = "demo"  # the start-up mode; the UI can switch it
@@ -43,6 +45,12 @@ class Settings(BaseSettings):
     # Cut fixed openings/closings off scripts and voice them once (D18). Off: every announcement
     # is voiced whole, so it is one clip per announcement and nothing is stitched but the chime.
     voice_split_segments: bool = True
+    # Live TTS only. Warm-up voices every site's fixed phrases at start-up (costs characters once,
+    # about 260 for the shipped sites); off by default so a free-tier key is never spent unasked.
+    relay_warm_segments: bool = False
+    # Committed real clips (docs/samples/manifest.json) are seeded into the cache at start-up, so
+    # the demo replays them at zero cost. Relative to the backend directory.
+    relay_samples_dir: str = "../docs/samples"
 
     prompts_dir: str = "prompts"
 

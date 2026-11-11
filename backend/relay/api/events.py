@@ -207,7 +207,7 @@ def build_router(ctx: Context) -> APIRouter:
 
     @router.get("/events")
     def list_events(
-        state: Literal["active", "superseded", "resolved"] | None = None,
+        state: Literal["active", "superseded", "resolved", "withdrawn"] | None = None,
         site_id: str | None = None,
         limit: int = Query(100, ge=1, le=500),
         detail: bool = False,
@@ -236,11 +236,9 @@ def build_router(ctx: Context) -> APIRouter:
         draft = draft_from_note(body.note, site, ctx.conns.llm, ctx.settings)
         if draft.status == "rejected":
             raise HTTPException(422, draft.detail)
-        if draft.status != "ready":
+        if draft.status != "ready" or draft.payload is None:  # a ready draft has a payload
             return NoteDraftOut(draft=draft)
-        event = EventInput.model_validate(
-            {"event_key": "draft", "site_id": site.id, "payload": draft.payload}
-        )
+        event = EventInput.of(event_key="draft", site_id=site.id, payload=draft.payload)
         context = build_context(site, event.type)
         context.languages = context.languages[:1]
         plan = generate(event, context, ctx.conns.llm, ctx.settings, now=timeutil.now())
@@ -249,7 +247,7 @@ def build_router(ctx: Context) -> APIRouter:
     @router.post("/events/preview")
     def preview(body: PreviewIn) -> PreviewOut:
         try:
-            probe = EventInput(event_key="draft", site_id=body.site_id, payload=body.payload)  # type: ignore[arg-type]
+            probe = EventInput.of(event_key="draft", site_id=body.site_id, payload=body.payload)
             site = events_service.get_site_for(body.site_id, probe.type)
         except (ValidationError, EventError) as exc:
             raise _refuse(exc) from exc

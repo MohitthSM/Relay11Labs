@@ -87,7 +87,8 @@ def build_jobs(settings: Settings, llm) -> list[Job]:
     on_v4 = settings.model_copy(update={"elevenlabs_model_live": scheduled})
     jobs.append(Job(f"compare_b_en_u1_{scheduled}", airport, plain, en1.source, on_v4))
 
-    severe = EventInput.of(event_key="a", site_id="tube_station", payload=first_payload("a_jubilee"))
+    severe_payload = first_payload("a_jubilee")
+    severe = EventInput.of(event_key="a", site_id="tube_station", payload=severe_payload)
     first, slots = scripts(severe, tube, llm, settings)
     s = next(x for x in slots if (x.language, x.urgency) == ("en", 1))
     item = voice.Item(s.spoken_text, "en", "live", chime=True, urgency=1)

@@ -210,7 +210,7 @@ export default function App() {
                 aria-pressed={source?.mode === m}
                 disabled={!source}
                 onClick={() => source?.mode !== m && changeSource(m)}
-                title={m === "demo" ? "Scripted scenarios" : "Real TfL line status, polled every minute"}
+                title={m === "demo" ? "Scripted scenarios. Switching here withdraws live TfL announcements" : "Real TfL line status, polled every minute"}
                 className={`border px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wider first:rounded-l-sm last:rounded-r-sm ${
                   source?.mode === m
                     ? "border-phosphor bg-phosphor/15 text-phosphor"

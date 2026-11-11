@@ -36,7 +36,7 @@ export function useZones(live: Live): Zone[] {
 
 export type EventsData = {
   active: RelayEvent[]; // with their announcements
-  recent: RelayEvent[]; // resolved, newest first, without announcements
+  recent: RelayEvent[]; // resolved or withdrawn, newest first, without announcements
   error: string | null;
   refresh: () => void;
 };
@@ -48,10 +48,10 @@ export function useEvents(live: Live): EventsData {
   const timer = useRef<number>();
 
   const load = useCallback(() => {
-    Promise.all([listEvents("active"), listEvents("resolved", false, 8)])
-      .then(([a, r]) => {
+    Promise.all([listEvents("active"), listEvents("resolved", false, 8), listEvents("withdrawn", false, 8)])
+      .then(([a, r, w]) => {
         setActive(a);
-        setRecent(r);
+        setRecent([...r, ...w].sort((x, y) => y.id - x.id).slice(0, 8));
         setError(null);
       })
       .catch((e: Error) => setError(e.message));

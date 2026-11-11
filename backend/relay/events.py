@@ -20,7 +20,16 @@ from sqlmodel import Session, col, select
 
 from relay import bus, jobs, timeutil, voice
 from relay.context import Context
-from relay.models import ACTIVE, PENDING, RESOLVED, SUPERSEDED, Announcement, Event, LLMCall
+from relay.models import (
+    ACTIVE,
+    PENDING,
+    RESOLVED,
+    SUPERSEDED,
+    WITHDRAWN,
+    Announcement,
+    Event,
+    LLMCall,
+)
 from relay.schemas import EventInput, LinePayload, PassengerPagePayload, StandChangePayload
 from relay.script.engine import ScriptPlan, build_context, generate
 from relay.sites import Site, load_sites
@@ -155,6 +164,23 @@ def resolve(
     session.refresh(event)
     _publish("event.resolved", event)
     log.info("event %s resolved", event.id)
+    return event
+
+
+def withdraw(session: Session, event: Event) -> Event:
+    """Stop an active event silently: its jobs are cancelled and no resolution message is made.
+    Used when Relay stops listening to the event's source (D23): the situation did not end, so
+    saying "good service has resumed" would be a false statement. Commits."""
+    assert event.id is not None
+    if event.state != ACTIVE:
+        raise EventError(409, "only an active event can be withdrawn")
+    event.state, event.resolved_at = WITHDRAWN, timeutil.now()
+    session.add(event)
+    jobs.cancel_jobs(session, event.id)
+    session.commit()
+    session.refresh(event)
+    _publish("event.withdrawn", event)
+    log.info("event %s withdrawn", event.id)
     return event
 
 

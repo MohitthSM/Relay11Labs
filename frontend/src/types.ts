@@ -146,7 +146,8 @@ export type Announcement = {
   audio_error: string | null;
 };
 
-export type EventState = "active" | "superseded" | "resolved";
+// withdrawn: stopped with no resolution message (TfL events when the source switches to demo)
+export type EventState = "active" | "superseded" | "resolved" | "withdrawn";
 
 export type RelayEvent = {
   id: number;
@@ -237,6 +238,7 @@ export type SourceStatus = {
   poll_s: number;
   app_key: boolean;
   flights: "mock" | "live";
+  withdrawn?: number; // PUT /source only: TfL events withdrawn by a switch to demo
 };
 
 export type StateMessage =

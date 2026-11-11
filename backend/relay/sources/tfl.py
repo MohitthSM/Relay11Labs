@@ -20,7 +20,9 @@ Rules (SPEC F1, CLAUDE.md fact lock):
   the last state is kept, the status turns to "error" with a warning, and the poll backs off.
   A snapshot is applied in the same call that fetched it, never later.
 - Events made here carry source "tfl" and key `tfl-<line>`, so they never collide with the
-  scripted scenarios. Live mode refuses scenario runs and demo mode does not poll.
+  scripted scenarios. Live mode refuses scenario runs and demo mode does not poll. Switching to
+  demo withdraws every active TfL event (jobs cancelled, no resolution message), so live data
+  never plays over a scenario.
 - The raw TfL response is not stored on the event (that needs a new column and the project has no
   migrations); each applied reading is logged with the line, severity and event id.
 - The app key goes only in the query string of the request. Errors are logged by type and status
@@ -30,18 +32,20 @@ Rules (SPEC F1, CLAUDE.md fact lock):
 import asyncio
 import logging
 import re
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import httpx
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from relay import bus, timeutil
 from relay import events as events_service
 from relay.config import Settings
 from relay.context import Context
+from relay.models import ACTIVE, Event
 from relay.schemas import LinePayload, LineStatus, Reason
 from relay.sites import Site
 
@@ -105,6 +109,9 @@ class FeedState:
     next_poll: datetime | None = None
     readings: dict[str, Reading] = field(default_factory=dict)  # last good reading per line id
     line_errors: dict[str, str] = field(default_factory=dict)  # a line the last good poll skipped
+    # Held while a poll applies readings and while the mode changes, so a poll that started in
+    # live mode can never create an event after the switch to demo has withdrawn them.
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 
 Fetch = Callable[[], Any]  # returns TfL's decoded JSON (blocking; runs in a worker thread)
@@ -309,7 +316,14 @@ def poll_once(
     state.failures, state.last_error, state.last_ok = 0, None, now
     state.next_poll = now + timedelta(seconds=settings.relay_tfl_poll_s)
     state.line_errors = {}
-    for line_id in line_ids(settings):
+    with state.lock:
+        if state.mode == "live":  # the mode may have changed while the fetch was in flight
+            _apply_all(ctx, state, site, readings)
+    return True
+
+
+def _apply_all(ctx: Context, state: FeedState, site: Site, readings: dict[str, Reading]) -> None:
+    for line_id in line_ids(ctx.settings):
         reading = readings.get(line_id)
         if reading is None:
             state.line_errors[line_id] = "missing or malformed in the response"
@@ -323,16 +337,32 @@ def poll_once(
         state.readings[line_id] = reading
         if action != "none":
             log.info("TfL %s severity %d -> %s", line_id, reading.severity, action)
-    return True
 
 
-def set_mode(state: FeedState, mode: DataMode) -> None:
-    """Switching to live polls at once. Switching to demo leaves running TfL events to play out
-    under their site policy; the poller just stops."""
-    if mode == "live" and state.mode != "live":
-        state.next_poll = None
-        state.failures, state.last_error = 0, None
-    state.mode = mode
+def withdraw_all(ctx: Context) -> int:
+    """Withdraw every active TfL event (jobs cancelled, no "good service" message). Returns how
+    many. The scheduler drops their queued clips on its next tick; a clip already on air ends
+    first, and a zone airs one clip at a time, so nothing from TfL overlaps a scenario."""
+    with Session(ctx.engine) as session:
+        rows = session.exec(select(Event).where(Event.state == ACTIVE, Event.source == SOURCE))
+        withdrawn = [events_service.withdraw(session, e) for e in rows.all()]
+    return len(withdrawn)
+
+
+def set_mode(ctx: Context, state: FeedState, mode: DataMode) -> int:
+    """Switch the data source. Blocking. Returns how many TfL events were withdrawn.
+
+    live -> polls at once.
+    demo -> the poller stops and every active TfL event is withdrawn, so live data never plays
+            over a scripted scenario. Back in live mode the first poll announces a line that is
+            still disrupted as a new event, from fresh data.
+    """
+    with state.lock:
+        if mode == "live" and state.mode != "live":
+            state.next_poll = None
+            state.failures, state.last_error = 0, None
+        state.mode = mode
+        return withdraw_all(ctx) if mode == "demo" else 0
 
 
 async def run(ctx: Context, state: FeedState, fetch: Fetch | None = None) -> None:

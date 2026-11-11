@@ -207,7 +207,7 @@ def build_router(ctx: Context) -> APIRouter:
 
     @router.get("/events")
     def list_events(
-        state: Literal["active", "superseded", "resolved"] | None = None,
+        state: Literal["active", "superseded", "resolved", "withdrawn"] | None = None,
         site_id: str | None = None,
         limit: int = Query(100, ge=1, le=500),
         detail: bool = False,

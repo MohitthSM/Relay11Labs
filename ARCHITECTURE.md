@@ -266,9 +266,22 @@ Sources: elevenlabs.io/docs (models, text-to-speech capability, Eleven v4, best-
 
 † Median model latency per the docs, excluding network. `eleven_turbo_v2*` is deprecated in favour of Flash.
 
-**v4 Turbo vs v4 on the same script (Phase 8): not measured yet.** No ElevenLabs key was available in the build environment. The method is ready: `scripts/render_samples.py` renders scenario B's level-1 script in EN, ES and FR on both models (no chime, each model in its own cold cache) and records characters, cost, time to first audio and total time per clip in `docs/samples/report.md`. Until someone has listened to the clips, D17 stays as it is. Known before listening: v4 costs twice as much per character ($0.08 vs $0.04, same on every plan, checked 2026-11-11). Scenario B's three level-1 clips are 383 characters: $0.015 on Turbo, $0.031 on v4.
+**v4 Turbo vs v4 on the same script (Phase 8, measured 2026-11-11).** Scenario B's EN level-1 script (124 characters) was rendered once on each model, with the voice George, the same seed and no chime: `docs/samples/compare_b_en_u1_*.mp3`, with all clips in `docs/samples/report.md`.
 
-**Voice choice (Phase 8): still the placeholder.** The docs say every default voice is retired on 2026-12-31 and replaced by new ones, and they do not publish voice ids. So the voice must come from the account's own voices list: `scripts/pick_voice.py` calls `GET /v2/voices` and ranks voices by verification in EN/ES/FR, by an announcer or narration use case, and by not being legacy. The final pick is made by listening.
+| | `eleven_v4_turbo` | `eleven_v4` |
+|---|---|---|
+| Same 124-char script: time to first audio / total | 2.22 s / 2.82 s | 2.45 s / 2.49 s |
+| All clips rendered (TTFA range) | 1.85 to 2.22 s (4 clips, 124 to 131 chars) | 2.45 to 3.71 s (7 clips, 124 to 157 chars) |
+| Audio | 9.64 s, -22.2 dB mean | 9.64 s, -21.8 dB mean; 98% of bytes differ, same pause positions |
+| Price per 1K characters | $0.04 | $0.08 |
+
+- **Latency.** v4 Turbo answered first, but by a fraction of a second on one pair. These are single requests from a cloud container through a proxy, so they show the order of magnitude, not a benchmark.
+- **Sound.** With the same seed, the two takes have almost identical timing, so any difference is in timbre and articulation. That has to be judged by ear: nobody has compared them by ear yet.
+- **D17 stands.** Turbo for what must play now, v4 for the levels rendered ahead of time. The measured gap supports it: v4 costs twice as much and is not faster.
+
+**First-play latency, scenario B, live.** Rendered one at a time, the 9 clips took 27.5 s in total. The app renders them at ingest, two at a time (`ELEVENLABS_MAX_CONCURRENCY=2`, the Free-tier limit), so a cold page would take about 14 s before its first play, against the SPEC §8 target of 8 s. Warm (every committed clip), it takes 0 s and 0 characters, which was verified through the app with TTS calls made to fail. Possible fix, not built: render level 1 first and levels 2 and 3 after the first play starts (an amendment to D4).
+
+**Voice (Phase 8): George, `JBFqnCBsd6RMkjVDRZzb`, premade.** Chosen with `scripts/pick_voice.py` (`GET /v2/voices`): of the account's 21 premade voices, he is the only British-accented one verified in EN, ES and FR, and he is not legacy. The owner approved him after listening to `b_en_u1.mp3`. The docs say every default voice is retired on 2026-12-31, so check `is_legacy` again before then.
 
 **Facts that shaped the design:**
 - **One voice, many languages.** On v4, when the target language differs from the voice's language, the output is fluent native speech, not accented speech. One brand voice serves EN/ES/FR. This is a pitch point.

@@ -29,6 +29,224 @@
    "cost_usd": 0.00496,
    "duration_s": 9.639,
    "parts": []
+  },
+  {
+   "id": "9d15f7998e920f4afa0b16f7b253740911c4b8974d6a79cb6792f627af7b466e",
+   "file": "b_en_u3.mp3",
+   "kind": "announcement",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 0,
+   "cost_usd": 0.0,
+   "duration_s": 13.819,
+   "parts": [
+    "d7e8a3754485fd6e92d1ceb1c0957d93b1e2b48329c50dc60174acf6f017e5a3"
+   ]
+  },
+  {
+   "id": "97d89ca5ac7b90dbfcc6da7669f09e16807d953ad9c9152c0c8ef5a25e87f325",
+   "file": "b_es_u1.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "es",
+   "characters": 128,
+   "cost_usd": 0.00512,
+   "duration_s": 10.031,
+   "parts": []
+  },
+  {
+   "id": "6499c3f48001529fd5853010e13892aaf49300ac98361a037ae7b4cbdd89aff3",
+   "file": "b_fr_u1.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "fr",
+   "characters": 131,
+   "cost_usd": 0.00524,
+   "duration_s": 8.829,
+   "parts": []
+  },
+  {
+   "id": "57f83492b64de7eeeb1162e61dc5799ead0f2671108451722433946d0dfac651",
+   "file": "b_en_u2.mp3",
+   "kind": "announcement",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 0,
+   "cost_usd": 0.0,
+   "duration_s": 11.572,
+   "parts": [
+    "7b4669f009caf09bd17dd00a7114716a1e4ce6be08a30f1782286c01b71b5e7a"
+   ]
+  },
+  {
+   "id": "0f6d0b7886dfb000bc24e0d6144096e0054acc689aa6a892ab01f7cbae9e7358",
+   "file": "b_es_u2.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "es",
+   "characters": 131,
+   "cost_usd": 0.01048,
+   "duration_s": 10.449,
+   "parts": []
+  },
+  {
+   "id": "960d0cb5290565119985a76393dab8b73b577ce9a44709f1abda26e000fa2807",
+   "file": "b_fr_u2.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "fr",
+   "characters": 136,
+   "cost_usd": 0.01088,
+   "duration_s": 9.404,
+   "parts": []
+  },
+  {
+   "id": "0ba43d0621f1b37b859d3f96a106c4ee1741de9694626036fa8222b9282afbfc",
+   "file": "b_es_u3.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "es",
+   "characters": 157,
+   "cost_usd": 0.01256,
+   "duration_s": 12.513,
+   "parts": []
+  },
+  {
+   "id": "26ce0f27e67e2286d7ed91c1c13d996824c7b50670a9ed10045c97dace140a33",
+   "file": "b_fr_u3.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "fr",
+   "characters": 157,
+   "cost_usd": 0.01256,
+   "duration_s": 10.762,
+   "parts": []
+  },
+  {
+   "id": "8a5c6023f88f764639177eb23f9b83c31fbee24718adf500d1480168658c26b4",
+   "file": "compare_b_en_u1_eleven_v4.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 124,
+   "cost_usd": 0.00992,
+   "duration_s": 9.639,
+   "parts": []
+  },
+  {
+   "id": "a1910f65ff604d8e7482667804a6b355b13bf16177f6337bb93e83fb78ba91db",
+   "file": "a_v1_en.mp3",
+   "kind": "announcement",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 0,
+   "cost_usd": 0.0,
+   "duration_s": 13.296,
+   "parts": [
+    "fa1acda22101def344659c596c78d19f440a28cb73a56bf8e8483de04a750f7f",
+    "16229612fd3a9f9961c6eab535bbe70981b1772796f9dbf041e18e6031f438ad",
+    "d4acab70dacbae7f3088510862bd45fa232a9474908e7fdb474d56b96eb63029"
+   ]
+  },
+  {
+   "id": "d7e8a3754485fd6e92d1ceb1c0957d93b1e2b48329c50dc60174acf6f017e5a3",
+   "file": "cache/d7e8a3754485fd6e92d1ceb1c0957d93b1e2b48329c50dc60174acf6f017e5a3.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 151,
+   "cost_usd": 0.01208,
+   "duration_s": 12.356,
+   "parts": []
+  },
+  {
+   "id": "7b4669f009caf09bd17dd00a7114716a1e4ce6be08a30f1782286c01b71b5e7a",
+   "file": "cache/7b4669f009caf09bd17dd00a7114716a1e4ce6be08a30f1782286c01b71b5e7a.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 134,
+   "cost_usd": 0.01072,
+   "duration_s": 10.109,
+   "parts": []
+  },
+  {
+   "id": "fa1acda22101def344659c596c78d19f440a28cb73a56bf8e8483de04a750f7f",
+   "file": "cache/fa1acda22101def344659c596c78d19f440a28cb73a56bf8e8483de04a750f7f.mp3",
+   "kind": "segment",
+   "permanent": true,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 21,
+   "cost_usd": 0.00084,
+   "duration_s": 1.567,
+   "parts": []
+  },
+  {
+   "id": "16229612fd3a9f9961c6eab535bbe70981b1772796f9dbf041e18e6031f438ad",
+   "file": "cache/16229612fd3a9f9961c6eab535bbe70981b1772796f9dbf041e18e6031f438ad.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 84,
+   "cost_usd": 0.00336,
+   "duration_s": 5.407,
+   "parts": []
+  },
+  {
+   "id": "d4acab70dacbae7f3088510862bd45fa232a9474908e7fdb474d56b96eb63029",
+   "file": "cache/d4acab70dacbae7f3088510862bd45fa232a9474908e7fdb474d56b96eb63029.mp3",
+   "kind": "segment",
+   "permanent": true,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 68,
+   "cost_usd": 0.00272,
+   "duration_s": 4.676,
+   "parts": []
   }
  ],
  "ledger": [
@@ -61,6 +279,109 @@
     }
    ],
    "total": 124
+  },
+  {
+   "at": "2026-11-11T16:58:27+00:00",
+   "what": "render_samples.py",
+   "clips": [
+    {
+     "clip": "b_en_u1",
+     "model": "eleven_v4_turbo",
+     "script": "template (mock LLM)",
+     "characters": 0,
+     "ttfa_ms": 1,
+     "total_ms": 1
+    },
+    {
+     "clip": "b_en_u3",
+     "model": "eleven_v4",
+     "script": "template (mock LLM)",
+     "characters": 151,
+     "ttfa_ms": 3711,
+     "total_ms": 4210
+    },
+    {
+     "clip": "b_es_u1",
+     "model": "eleven_v4_turbo",
+     "script": "template (mock LLM)",
+     "characters": 128,
+     "ttfa_ms": 2061,
+     "total_ms": 2111
+    },
+    {
+     "clip": "b_fr_u1",
+     "model": "eleven_v4_turbo",
+     "script": "template (mock LLM)",
+     "characters": 131,
+     "ttfa_ms": 1852,
+     "total_ms": 1894
+    },
+    {
+     "clip": "b_en_u2",
+     "model": "eleven_v4",
+     "script": "template (mock LLM)",
+     "characters": 134,
+     "ttfa_ms": 3262,
+     "total_ms": 3542
+    },
+    {
+     "clip": "b_es_u2",
+     "model": "eleven_v4",
+     "script": "template (mock LLM)",
+     "characters": 131,
+     "ttfa_ms": 3297,
+     "total_ms": 3339
+    },
+    {
+     "clip": "b_fr_u2",
+     "model": "eleven_v4",
+     "script": "template (mock LLM)",
+     "characters": 136,
+     "ttfa_ms": 2935,
+     "total_ms": 2976
+    },
+    {
+     "clip": "b_es_u3",
+     "model": "eleven_v4",
+     "script": "template (mock LLM)",
+     "characters": 157,
+     "ttfa_ms": 3292,
+     "total_ms": 3351
+    },
+    {
+     "clip": "b_fr_u3",
+     "model": "eleven_v4",
+     "script": "template (mock LLM)",
+     "characters": 157,
+     "ttfa_ms": 3251,
+     "total_ms": 3312
+    },
+    {
+     "clip": "compare_b_en_u1_eleven_v4_turbo",
+     "model": "eleven_v4_turbo",
+     "script": "template (mock LLM)",
+     "characters": 0,
+     "ttfa_ms": 1,
+     "total_ms": 1
+    },
+    {
+     "clip": "compare_b_en_u1_eleven_v4",
+     "model": "eleven_v4",
+     "script": "template (mock LLM)",
+     "characters": 124,
+     "ttfa_ms": 2446,
+     "total_ms": 2490
+    },
+    {
+     "clip": "a_v1_en",
+     "model": "eleven_v4_turbo",
+     "script": "template (mock LLM)",
+     "characters": 173,
+     "ttfa_ms": 553,
+     "total_ms": 2039
+    }
+   ],
+   "total": 1422
   }
  ]
 }

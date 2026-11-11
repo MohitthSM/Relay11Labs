@@ -1,8 +1,8 @@
 id: bus_station
 name: Victoria Coach and Bus Station
 hub_type: bus
-voice_id: JBFqnCBsd6RMkjVDRZzb   # PLACEHOLDER (API docs example), unverified. Run scripts/pick_voice.py
-                              # with a key, listen in EN/ES/FR, replace. Legacy default voices end 2026-12-31.
+voice_id: JBFqnCBsd6RMkjVDRZzb   # George (premade): British, verified EN/ES/FR, approved by ear
+                              # (Phase 8, ARCHITECTURE section 7). Default voices retire 2026-12-31: re-check.
 voice_settings: {}      # optional: stability, similarity_boost, style, speed
 style_guide: |
   Short and practical. Lead with the route number. Say the new stand, then the old one,

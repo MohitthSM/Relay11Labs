@@ -75,5 +75,5 @@ Where the saving comes from:
 ## What this does not cover
 
 - **Scenario B (airport pages)** is more expensive per event. Nine clips per page (3 languages × 3 levels), and levels 2 and 3 go to `eleven_v4` at twice the price. One page is about 1,250 characters, about $0.085 (ARCHITECTURE §8). A gate area paging 40 passengers a day would bill about 50K characters ($3.40): the cache helps less there, because every page has a different name.
-- **Real ElevenLabs latency and audio quality.** These were not measured: no API key was available in the build environment (PLAN Phase 8). `scripts/render_samples.py` produces the per-clip characters, cost and time to first audio as soon as a key is set.
+- **Real rendering.** The character counts above are confirmed by real renders. The scenario B clips billed 124 to 157 characters each, exactly the planned counts (`docs/samples/report.md`). Time to first audio was 1.9 to 2.2 s on v4 Turbo and 2.5 to 3.7 s on v4, from a cloud container through a proxy. Committed clips replay from the cache at zero cost.
 - **`audio_effects`**, which has no extra cost per the docs, and the Enterprise zero-retention option.

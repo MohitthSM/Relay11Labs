@@ -20,4 +20,23 @@ Run total: **53** characters.
 
 Run total: **124** characters.
 
-**Total so far: 177 characters.**
+## 2026-11-11T16:58:27+00:00: render_samples.py
+
+| Clip | Model | Script | Chars | TTFA (ms) | Total (ms) |
+|---|---|---|---|---|---|
+| b_en_u1 | eleven_v4_turbo | template (mock LLM) | 0 | 1 | 1 |
+| b_en_u3 | eleven_v4 | template (mock LLM) | 151 | 3711 | 4210 |
+| b_es_u1 | eleven_v4_turbo | template (mock LLM) | 128 | 2061 | 2111 |
+| b_fr_u1 | eleven_v4_turbo | template (mock LLM) | 131 | 1852 | 1894 |
+| b_en_u2 | eleven_v4 | template (mock LLM) | 134 | 3262 | 3542 |
+| b_es_u2 | eleven_v4 | template (mock LLM) | 131 | 3297 | 3339 |
+| b_fr_u2 | eleven_v4 | template (mock LLM) | 136 | 2935 | 2976 |
+| b_es_u3 | eleven_v4 | template (mock LLM) | 157 | 3292 | 3351 |
+| b_fr_u3 | eleven_v4 | template (mock LLM) | 157 | 3251 | 3312 |
+| compare_b_en_u1_eleven_v4_turbo | eleven_v4_turbo | template (mock LLM) | 0 | 1 | 1 |
+| compare_b_en_u1_eleven_v4 | eleven_v4 | template (mock LLM) | 124 | 2446 | 2490 |
+| a_v1_en | eleven_v4_turbo | template (mock LLM) | 173 | 553 | 2039 |
+
+Run total: **1422** characters.
+
+**Total so far: 1599 characters.**

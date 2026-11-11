@@ -149,7 +149,7 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 8: Polish
 
-> **Status:** the review, docs and packaging are done and green in mock mode; **every live check is blocked** because no ElevenLabs or Anthropic key was available to the build session (none in the environment, and the key request was declined). Nothing below claims a live result.
+> **Status:** the review, docs and packaging are done and green in mock mode. The ElevenLabs live checks are done with the owner's free-tier key, injected as a network secret (see "Live verification" below). The Claude live check is still open: the Anthropic key cannot be injected in this environment.
 >
 > **Done:**
 > - **Source switch, both ways** (D23): Live → Demo withdraws TfL events, so they never play over a scenario. Demo → Live stops a running scenario and withdraws its events. A lock makes each switch and a poll or step in flight mutually exclusive. Tests: `tests/test_source_switch.py`.
@@ -159,13 +159,18 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 >   - `scripts/pick_voice.py`: lists the account's voices (GET /v2/voices) and ranks them for PA use.
 >   - `scripts/render_samples.py`: scenario B (9 clips) and A (3 versions) as MP3s in `docs/samples/` with a per-clip report (model, characters, cost, TTFA, total), plus the same B script on `eleven_v4_turbo` and `eleven_v4`.
 >
-> **Live verification, still open (needs keys):**
-> 1. `cd backend && uv run pytest -m live -q` (Claude and ElevenLabs smoke tests). Not run.
-> 2. `make sync-pronunciations`, then commit `sites/pronunciation.lock.json`. Not run, so there is no lock file and requests carry no dictionary yet.
-> 3. `uv run python scripts/render_samples.py`, then commit `docs/samples/`. Not run. TTFA, characters and cost per clip are unmeasured. The characters are known from mock (see `docs/COSTS.md`); cost follows from the price table.
-> 4. Listen to `docs/samples/compare_*` and record v4 Turbo vs v4 in ARCHITECTURE §7. Not done.
-> 5. `uv run python scripts/pick_voice.py`, listen in EN/ES/FR, then set `voice_id` in `sites/*.yaml`. Not done: the placeholder `JBFqnCBsd6RMkjVDRZzb` stays. The ElevenLabs docs say the default voices are retired on 2026-12-31, so pick a non-legacy voice.
+> **Live verification (2026-11-11, ElevenLabs key as a network secret, free tier, owner's budget 5,000 credits):**
+> 1. **ElevenLabs smoke test: passed** (`pytest -m live`, 53 characters). **Claude smoke test: not run.** The Anthropic key cannot be injected in this environment; README "Running live locally" says how to run it.
+> 2. **Pronunciation dictionaries created**, one per site with a PLS (tube, bus), and `sites/pronunciation.lock.json` committed. No characters.
+> 3. **Real samples in `docs/samples/`:** all 9 scenario B clips, scenario A's first announcement, and the model comparison. They cost 1,546 characters across two runs (124 + 1,422); with the smoke test, 1,599 characters were used in total. `report.md` lists per clip the model, characters, time to first audio and total.
+> 4. **The demo replays from cache.** At start-up with live TTS, the app seeds the committed clips. Scenario B through the real app gave 9 of 9 announcements from cache, 0 TTS calls and 0 characters (verified with TTS calls made to fail). This holds while the LLM is in mock mode: Claude's wording is new each time.
+> 5. **v4 Turbo vs v4: measured, ARCHITECTURE §7.** Numbers are recorded; comparing them by ear is still open.
+> 6. **Voice: George (`JBFqnCBsd6RMkjVDRZzb`, premade), approved by the owner** after listening.
 >
+> **Open findings from live:**
+> - A cold scenario B takes about 14 s to its first play (9 renders, 2 at a time), against the 8 s target. See ARCHITECTURE §7.
+> - The key has no `user_read` permission, so the account's real credit usage is not visible; usage is counted from the characters sent.
+
 > **Not done from the list below:** `audio_effects`, chime loudness matching, `passenger_name_ipa`, v4 audio tags for level 3, and `speechSynthesis` in mock mode. All of them need listening with live audio, except the last, which was left out to keep mock mode deterministic. The ffmpeg layer of the backend image could not be built in the build environment (`deb.debian.org` is blocked there); it is a standard Debian package.
 
 **Goal:** make the pitch land.

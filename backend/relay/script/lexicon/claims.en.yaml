@@ -1,0 +1,34 @@
+# Claim lexicon (EN). Each key is an operational claim; each regex (case-insensitive) detects it.
+# The event payload decides which keys a script may contain (factlock.allowed_claims).
+# Every lexicon miss found in testing becomes a new regex here plus a test case.
+
+# line status
+good_service: ['\bgood service\b', '\bresumed\b', '\brunning normally\b']
+minor_delays: ['\bminor delays?\b', '\bslight delays?\b']
+severe_delays: ['\bsevere(ly)?\b', '\bmajor delays?\b', '\bserious delays?\b']
+delayed: ['\bdelay(s|ed)?\b', '\btaking longer\b', '\blonger than usual\b']
+part_suspended: ['\bpart(ial)? suspension\b', '\bpart(ly|ially)?[- ]suspended\b', '\bno service between\b']
+suspended: ['\bsuspen(ded|sion)\b', '\bno service\b', '\bnot running\b', '\bclosed\b']
+
+# causes (one key per Reason enum value)
+signal_failure: ['\bsignal(ling)? (failure|fault|problem)s?\b']
+train_fault: ['\b(faulty|failed|broken[- ]down) train\b', '\btrain (fault|failure)\b']
+customer_incident: ['\b(customer|passenger) incident\b', '\bill (customer|passenger)\b']
+power_failure: ['\bpower (failure|cut|outage|supply problem)s?\b']
+staff_shortage: ['\bstaff(ing)? (shortage|availability)\b', '\bshortage of staff\b']
+engineering_works: ['\bengineering works?\b', '\bplanned works?\b', '\btrack works?\b']
+roadworks: ['\broad ?works\b']
+operational_reasons: ['\boperational reasons?\b']
+
+# paging
+final_call: ['\bfinal (boarding )?call\b']
+closing: ['\babout to close\b', '\bclos(es|ing|ed)\b', '\blast call\b', '\bwill close\b']
+
+# claims no current event type supports (always rejected)
+cancelled: ['\bcancel+(ed|ation)\b']
+offloaded: ['\boffload', '\b(bags|luggage|baggage) will be (removed|taken off)\b']
+diverted: ['\bdivert']
+crowding: ['\bovercrowd', '\bvery busy\b']
+
+# duration
+minutes: ['\bminutes?\b', '\bmins?\b', '\bhours?\b']

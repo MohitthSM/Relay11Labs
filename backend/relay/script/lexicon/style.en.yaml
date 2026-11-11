@@ -1,0 +1,6 @@
+# Quote YAML 1.1 booleans ("on", "no", "yes") or they load as true/false.
+# Urgency markers: the more of these a paging script has, the more urgent it sounds.
+# The lock requires a minimum count per urgency level (factlock.URGENCY_FLOOR).
+urgency: [immediately, now, last call, about to close, urgently, ready to depart, right away]
+# Words that show the script is in this language (the cheap language check).
+stopwords: [the, please, is, "on", to, for, your, there, are, has, we, this, and, from]

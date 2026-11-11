@@ -1,0 +1,9 @@
+{
+  "name": "c_route25",
+  "description": "Bus station: route 25 moves from Stand B to Stand F, 7 plays over 20 min (SPEC 5.C)",
+  "site_id": "bus_station",
+  "events": [
+    {"at_s": 0, "action": "create", "event_key": "stand-25",
+     "payload": {"type": "stand_change", "route": "25", "from_stand": "B", "to_stand": "F"}}
+  ]
+}

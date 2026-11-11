@@ -1,0 +1,27 @@
+# Claim lexicon (FR). Same keys as claims.en.yaml. Case-insensitive.
+
+good_service: ['\bservice normal\b', '\ba repris\b', '\btrafic (est )?r[ée]tabli\b', '\br[ée]tabli\b']
+minor_delays: ['\bl[ée]gers retards\b', '\bretards? mineurs?\b', '\bfaibles retards\b']
+severe_delays: ['\bimportants retards\b', '\bretards? importants?\b', '\bgraves (retards|perturbations)\b', '\bfortement perturb[ée]e?\b']
+delayed: ['\bretard', '\bperturb[ée]e?s?\b']
+part_suspended: ['\bpartiellement (interrompu|suspendu)e?\b', '\binterruption partielle\b']
+suspended: ['\binterrompue?\b', '\binterruption\b', '\bsuspendue?\b', '\baucun train ne circule\b', '\bferm[ée]e?\b']
+
+signal_failure: ['\b(panne|d[ée]faillance|incident) de signalisation\b']
+train_fault: ['\btrain en panne\b', '\bpanne (de|d.un) train\b']
+customer_incident: ['\bincident (voyageur|de voyageur|impliquant un voyageur)\b', '\bmalaise voyageur\b']
+power_failure: ['\bpanne (d.alimentation|[ée]lectrique|de courant)\b', '\bcoupure de courant\b']
+staff_shortage: ['\bmanque de personnel\b']
+engineering_works: ['\btravaux (de maintenance|programm[ée]s)\b']
+roadworks: ['\btravaux (de voirie|sur la chauss[ée]e)\b']
+operational_reasons: ['\braisons op[ée]rationnelles\b']
+
+final_call: ['\bdernier appel\b']
+closing: ['\bva (bient[oô]t )?fermer\b', '\bfermeture\b', '\bferme\b', '\btout dernier appel\b', '\bse ferme\b']
+
+cancelled: ['\bannul[ée]e?s?\b', '\bannulation\b']
+offloaded: ['\bd[ée]barqu', '\bbagages seront retir[ée]s\b']
+diverted: ['\bd[ée]vi[ée]e?\b', '\bd[ée]viation\b', '\bd[ée]tourn']
+crowding: ['\baffluence\b', '\bbond[ée]e?\b']
+
+minutes: ['\bminutes?\b', '\bheures?\b']

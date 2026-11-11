@@ -1,0 +1,7 @@
+# Cardinal number words (EN). Facts can only arrive through placeholders, so a number word in
+# model text is an invented fact. `allow` lists idioms that contain a number word but no number.
+words: [one, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve, thirteen,
+        fourteen, fifteen, sixteen, seventeen, eighteen, nineteen, twenty, thirty, forty, fifty,
+        sixty, seventy, eighty, ninety, hundred, thousand, half, quarter, dozen, couple,
+        first, second, third, fourth, fifth]
+allow: [no one, one another, every one, any one, at once]

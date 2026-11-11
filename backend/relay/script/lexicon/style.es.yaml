@@ -1,0 +1,4 @@
+urgency: [inmediatamente, ahora, ya, "último aviso", a punto de cerrar, urgentemente,
+          listo para salir, de inmediato, "cuanto antes"]
+# Only words that are not also common in French or English ("y", "se", "la", "de" are left out).
+stopwords: [el, los, las, por, favor, hay, del, su, este, esta, "está", "diríjase", con, para]

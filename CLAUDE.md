@@ -4,7 +4,7 @@ Relay is a context-aware PA system for transport hubs, built as a pitch demo for
 
 **Read before working:**
 - `SPEC.md` (what and why)
-- `ARCHITECTURE.md` (how, and the design decisions D1–D14)
+- `ARCHITECTURE.md` (how, and the design decisions D1–D18)
 - `PLAN.md` (which phase we are in)
 
 Do not contradict a decision in ARCHITECTURE.md silently. If a change needs one, update the doc in the same change and say so.
@@ -32,16 +32,16 @@ Do not contradict a decision in ARCHITECTURE.md silently. If a change needs one,
 ## Stack
 
 - **Backend:**
-  - Python 3.12, FastAPI, Pydantic v2, `pydantic-settings`
+  - Python 3.12 (pinned in `backend/.python-version`), FastAPI, Pydantic v2, `pydantic-settings`
   - SQLModel + SQLite
   - `anthropic` (Claude API) and `elevenlabs` (official SDK, pinned `>=2.77,<3`)
-  - `mutagen` (MP3 duration), `httpx` (TfL), `pyyaml`
-- **Tooling:** `uv` for env and deps, `pytest`, `pytest-asyncio`, `ruff` (lint + format).
+  - `mutagen` (audio duration), `pydub` (stitches clips; needs the `ffmpeg` binary for MP3; `audioop-lts` is its Python 3.13 shim), `httpx` (TfL), `pyyaml`
+- **Tooling:** `uv` for env and deps, `pytest`, `pytest-asyncio`, `ruff` (lint + format), `pyright` (types, on `relay/` and `scripts/`).
 - **Frontend:** React + Vite + TypeScript + Tailwind. No state library: `fetch` + `useState`/`useEffect`, and native `EventSource` for SSE.
 - **Models (via `.env`):**
   - `SCRIPT_MODEL_DEFAULT=claude-haiku-5-5`
   - `SCRIPT_MODEL_ESCALATION=claude-sonnet-5-5`, used for fact-lock retries and all staff notes
-  - `ELEVENLABS_MODEL_ID=eleven_v4_turbo`
+  - `ELEVENLABS_MODEL_LIVE=eleven_v4_turbo` (urgent/live clips), `ELEVENLABS_MODEL_SCHEDULED=eleven_v4` (escalation levels). Routing table in `voice.py` (D17).
 
 ## Folder layout
 
@@ -56,38 +56,48 @@ relay/
 │   │   ├── main.py                # FastAPI app, lifespan starts scheduler + sources
 │   │   ├── config.py              # Settings (pydantic-settings), mock/live resolution
 │   │   ├── db.py                  # engine, session dependency, create_all
-│   │   ├── models.py              # SQLModel tables: Event, LLMCall, Announcement, AudioClip, PlaybackJob, PlayLog
+│   │   ├── models.py              # SQLModel tables: Event, LLMCall, Announcement, AudioClip, VoiceRender, PlaybackJob, PlayLog
+│   │   ├── context.py             # Context: providers + settings + engine, shared by routers and services
+│   │   ├── retry.py               # call_with_retry (TTS retries in voice.py, D14)
 │   │   ├── schemas.py             # Pydantic event payloads (discriminated union) + API DTOs
 │   │   ├── sites.py               # load/validate sites/*.yaml
 │   │   ├── events.py              # create / update / resolve; orchestrates script → voice → schedule
-│   │   ├── voice.py               # render with content-hash cache
+│   │   ├── voice.py               # model routing, content-hash cache, segments + stitching, metrics
+│   │   ├── pronunciation.py       # PLS parsing, pronunciation.lock.json
+│   │   ├── pronsync.py            # create/update a site's dictionary (used by the script)
 │   │   ├── scheduler.py           # 1 s tick loop, zone busy tracking, escalation
-│   │   ├── bus.py                 # in-memory SSE fan-out
+│   │   ├── bus.py                 # in-memory fan-out (WebSocket state changes, SSE play commands)
 │   │   ├── timeutil.py            # now(), scaled(seconds) — the ONLY place RELAY_TIME_SCALE is read
+│   │   ├── prompts.py             # load versioned prompt files (backend/prompts/)
 │   │   ├── script/
-│   │   │   ├── engine.py          # LLM → fact lock → escalate → template
-│   │   │   ├── factlock.py        # pure checks, no I/O
+│   │   │   ├── engine.py          # LLM → fact lock → escalate → template; returns ScriptPlan
+│   │   │   ├── factlock.py        # pure checks, no I/O beyond cached lexicons
 │   │   │   ├── templates.py       # deterministic wording per type/urgency/language
-│   │   │   ├── prompt.py          # system + user prompt builders
+│   │   │   ├── prompt.py          # loads system prompt per hub type, builds the user message
+│   │   │   ├── calls.py           # one LLM attempt → LLMCallRecord (tokens, cost, outcome)
+│   │   │   ├── notes.py           # staff note → draft event (screen, extract, extraction lock)
+│   │   │   ├── note_rules.py      # deterministic note parser (mock LLM + fallback)
 │   │   │   ├── normalize.py       # script → spoken_text
-│   │   │   └── lexicon/           # claims.<lang>.yaml, numbers.<lang>.yaml
+│   │   │   ├── lexicons.py        # loads lexicon/*.yaml
+│   │   │   └── lexicon/           # claims/numbers/style.<lang>.yaml, notes.en.yaml
 │   │   ├── providers/
 │   │   │   ├── llm_base.py        # LLMProvider Protocol, LLMResult
 │   │   │   ├── llm_anthropic.py
 │   │   │   ├── llm_mock.py
 │   │   │   ├── tts_base.py        # TTSProvider Protocol, RenderRequest, TTSResult
-│   │   │   ├── tts_elevenlabs.py
+│   │   │   ├── tts_elevenlabs.py  # also pronunciation dictionary create/update
 │   │   │   ├── tts_mock.py
 │   │   │   └── pricing.py         # $ per MTok / per 1K chars
 │   │   ├── sources/
 │   │   │   ├── replay.py          # plays scenarios/*.json on a (scaled) timeline
 │   │   │   └── tfl.py             # Phase 7: TfL line status poller
 │   │   └── api/
-│   │       ├── events.py  playback.py  metrics.py  scenarios.py
-│   ├── sites/                     # tube_station.yaml, airport.yaml, bus_station.yaml, *.pls
+│   │       ├── events.py  ws.py  playback.py  scenarios.py  metrics.py (Phase 6)
+│   ├── prompts/                   # <name>.v<N>.md: script_<hub>, script_rules, note_extract
+│   ├── sites/                     # tube_station.yaml, airport.yaml, bus_station.yaml, *.pls, pronunciation.lock.json
 │   ├── scenarios/                 # a_jubilee.json, b_ba117.json, c_route25.json
-│   ├── static/chime.mp3
-│   ├── scripts/sync_pronunciations.py
+│   ├── static/chime.wav           # generated by scripts/make_chime.py
+│   ├── scripts/sync_pronunciations.py  make_chime.py
 │   ├── tests/                     # mirrors relay/; test_factlock.py is the biggest file
 │   └── data/                      # git-ignored: relay.db, audio/
 └── frontend/
@@ -106,8 +116,9 @@ Run from the repo root.
 make setup        # cd backend && uv sync ; cd frontend && npm install
 make dev          # backend :8000 (uvicorn --reload) + frontend :5173 (vite, proxies /api)
 make test         # cd backend && uv run pytest -q
-make lint         # uv run ruff check . && uv run ruff format --check . && (cd frontend && npm run typecheck)
+make lint         # ruff check + format --check + pyright (backend), then npm run typecheck (frontend)
 make fmt          # uv run ruff format . && uv run ruff check --fix .
+make sync-pronunciations  # upload/update sites/*.pls to ElevenLabs (needs ELEVENLABS_API_KEY)
 make demo-a       # POST /scenarios/a_jubilee/run (same for demo-b, demo-c)
 ```
 
@@ -127,9 +138,13 @@ SCRIPT_MODEL_DEFAULT=claude-haiku-5-5
 SCRIPT_MODEL_ESCALATION=claude-sonnet-5-5
 ANTHROPIC_SERVER_FALLBACK=false
 LLM_TIMEOUT_S=6
-ELEVENLABS_MODEL_ID=eleven_v4_turbo
+ELEVENLABS_MODEL_LIVE=eleven_v4_turbo      # urgent / live announcements: lowest latency
+ELEVENLABS_MODEL_SCHEDULED=eleven_v4       # scheduled / escalation: highest quality
 ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
 ELEVENLABS_MAX_CONCURRENCY=2
+ELEVENLABS_TIMEOUT_S=20
+AUDIO_DIR=data/audio
+VOICE_SPLIT_SEGMENTS=true        # false: voice each announcement whole (no fixed opening/closing)
 RELAY_TIME_SCALE=1              # 60 = one minute passes in one second
 RELAY_MOCK_HALLUCINATE=false    # mock LLM injects one false fact per event (demo)
 RELAY_PII_RETENTION_HOURS=24
@@ -146,7 +161,7 @@ Voice ids and pronunciation dictionary locators are set per site in `sites/*.yam
 - Ruff config: line length 100, rules `E,F,I,UP,B,SIM`.
 - Functions over classes. Classes only for Pydantic/SQLModel models and provider implementations.
 - Pure core, thin edges:
-  - `factlock.py`, `templates.py`, `normalize.py`, `prompt.py` and scheduler decision logic do no I/O and take explicit arguments.
+  - `factlock.py`, `templates.py`, `normalize.py` and scheduler decision logic do no I/O and take explicit arguments (lexicon and prompt files are read once and cached).
   - Time comes in as a parameter (`now: datetime`), never from `datetime.now()` inside logic.
 - Sync SQLModel sessions inside FastAPI's threadpool are fine. Only `scheduler.py`, `bus.py` and the SSE endpoint are `async`. Blocking provider calls are run with `asyncio.to_thread`.
 - All intervals go through `timeutil.scaled()`. Never `asyncio.sleep(<literal>)` outside `timeutil`.
@@ -155,13 +170,16 @@ Voice ids and pronunciation dictionary locators are set per site in `sites/*.yam
 - Logging: `logging` stdlib, one logger per module, no PII. Metrics come from DB rows, not from log parsing.
 
 **LLM prompts**
-- Prompts live in `script/prompt.py` as plain f-strings or constants. They are versioned with `PROMPT_VERSION`, which is stored on `LLMCall`.
+- System prompts live in versioned files `backend/prompts/<name>.v<N>.md` (`string.Template`, `$var`): one per hub type (`script_underground`, `script_airport`, `script_bus`) with house style and few-shot examples, the shared `script_rules`, and `note_extract`. Never edit a released version in place: add `v<N+1>`. `script/prompt.py` loads the highest version and builds the user message in code. The version ref (`script_airport.v1+script_rules.v1`) is stored on every LLM call record.
+- The user message names value facts only as `{placeholders}`, never their values (so passenger names are not sent to the LLM). Staff notes go in `<staff_note>` tags as data and never reach the script prompt.
 - The output is always structured (Pydantic model through `messages.parse`). Never regex-parse free text.
 - Do not send `temperature`/`top_p`/`top_k`, assistant prefill, or forced `tool_choice`. Current models reject them.
 
 **ElevenLabs**
 - Only `providers/tts_elevenlabs.py` imports `elevenlabs`.
 - Always pass `model_id`, `language_code`, `output_format` and `seed` explicitly.
+- Every request carries the site's pronunciation dictionary version, fixed segments included. One voice per site, in every language.
+- Never store or log the spoken text (names): `VoiceRender` and `AudioClip` hold ids, counts and timings only.
 - Never put SSML or `<break>` in text, because v4 ignores or doesn't support it.
 - Audio tags and IPA are inserted only by code (`normalize.py`), never by the LLM. The fact lock rejects `[ ] < > /` in LLM text.
 

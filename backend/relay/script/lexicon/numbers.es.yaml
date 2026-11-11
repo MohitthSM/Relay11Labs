@@ -1,0 +1,7 @@
+# Cardinal number words (ES). "un", "una" and "uno" are left out on purpose: they are also the
+# indefinite article ("un vuelo"), so they cannot be told apart from a number by word alone.
+words: [dos, tres, cuatro, cinco, seis, siete, ocho, nueve, diez, once, doce, trece, catorce,
+        quince, "dieciséis", diecisiete, dieciocho, diecinueve, veinte, veintiuno, treinta,
+        cuarenta, cincuenta, sesenta, setenta, ochenta, noventa, cien, ciento, mil, media,
+        medio, docena, "segundo", tercero, cuarto, quinto]
+allow: [media hora de cortesía]

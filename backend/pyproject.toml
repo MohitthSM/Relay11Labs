@@ -1,0 +1,58 @@
+[project]
+name = "relay"
+version = "0.1.0"
+description = "Relay: context-aware PA system for transport hubs"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.4",
+  "sqlmodel>=0.0.22",
+  "pyyaml>=6",
+  "anthropic>=2.7,<3",
+  "elevenlabs>=2.77,<3",
+  "mutagen>=1.48.1",
+  "pydub>=0.25.1",
+  "audioop-lts>=0.2.1 ; python_full_version >= '3.13'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "httpx>=0.27",
+    "pyright>=1.1.414",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["relay"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: calls real providers; needs keys and -m live"]
+addopts = "-m 'not live'"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.pyright]
+include = ["relay", "scripts"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"

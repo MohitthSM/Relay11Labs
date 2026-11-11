@@ -1,0 +1,34 @@
+id: tube_station
+name: Canary Wharf Underground station
+hub_type: underground
+voice_id: JBFqnCBsd6RMkjVDRZzb   # PLACEHOLDER: a stock ElevenLabs voice taken from the API docs example.
+                              # Listen in EN/ES/FR and replace before the pitch (PLAN open items).
+voice_settings: {}      # optional: stability, similarity_boost, style, speed
+style_guide: |
+  Calm, plain and brief. Open disruption messages with "Customer information."
+  Say the line, then what is happening, then the cause if known, then the advice.
+  Prefer "consider alternative routes" to telling people what to do.
+  Apologise once, at the end, only for disruption. Never speculate about when it will end.
+pronunciation_file: tube_station.pls
+allowed_terms: [Underground, London]
+segments:                 # fixed phrases: voiced once, cached permanently, stitched around the middle
+  en:
+    openings: ["This is an update. Customer information.", "Customer information."]
+    closings: ["Please consider alternative routes. We apologise for the disruption."]
+zones:
+  - {id: jubilee-eb, name: Jubilee eastbound platform, languages: [en]}
+  - {id: jubilee-wb, name: Jubilee westbound platform, languages: [en]}
+  - {id: ticket-hall, name: Ticket hall, languages: [en]}
+policies:
+  line_status:
+    zones: [jubilee-eb, jubilee-wb, ticket-hall]
+    interval_s: 300
+    priority: 50
+    resolution_plays: 2
+gazetteer:
+  lines: [Jubilee, Victoria, Northern, Central, District, Circle, Piccadilly, Bakerloo,
+          Metropolitan, Elizabeth, Waterloo & City, Hammersmith & City, DLR]
+  stations: [Canary Wharf, North Greenwich, Canada Water, Bermondsey, London Bridge, Southwark,
+             Waterloo, Westminster, Green Park, Bond Street, Baker Street, Stratford, West Ham,
+             Canning Town, Stanmore, Wembley Park, Finchley Road, Swiss Cottage, Holborn,
+             Marylebone]

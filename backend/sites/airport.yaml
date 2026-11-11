@@ -19,7 +19,7 @@ policies:
     max_plays: 3
     duration_s: 360
     escalate: true
-    priority: 90
+    priority: paging          # pages outrank delays and info (D19)
 gazetteer:
   cities: [New York, London, Madrid, Paris, Barcelona, Dublin, Edinburgh, Los Angeles, Miami,
            Rome, Lisbon, Nice]

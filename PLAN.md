@@ -77,6 +77,8 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
 
 ## Phase 5: Scheduler
 
+> **Status:** built and tested in mock mode. Done: `scheduler.py` (`step(ctx, state, now)` as a sync, clock-free tick plus the `run` loop in the lifespan), `jobs.py` (one job per event version and zone, approval rule, hold/release/cancel), per-zone queues with priority preemption at clip boundaries and resume (D19), never-stack repeats, escalation, `max_plays`, expiry and auto-resolve, resolution messages, the `PlayLog` audit log (`GET /playback/log`), `GET /playback/zones`, deduplication of identical events (D21). **Scope added by the Phase 5 brief:** human approval before first play for staff notes and high-severity events, configurable per site policy (`POST /events/{id}/approve`, D20; scenario runs take `auto_approve`); priority classes security > safety > paging > delays > info (security and safety reserved, CLAUDE.md constraint 5). **Changed from the list below:** play commands go out on the existing `/ws/events` WebSocket, not an SSE stream (D8 amended); the Zones page has one WebSocket for all panels. Tests: `tests/test_scheduler.py` (fake clock) and end-to-end A, B, C in `tests/test_scenarios.py`. **Not verified:** audible playback in a real browser tab (headless check only: the panels, captions and approve flow were exercised with Playwright).
+
 **Goal:** clips play in zones on the right cadence, escalate, and stop correctly.
 
 - `scheduler.py`:
@@ -89,9 +91,9 @@ Phase 1 (this set of docs) is done. Each later phase ends with `make lint && mak
   - cancellation on update or resolve
   - resolution messages
   - auto-resolve when `ends_at` passes
-- `GET /playback/stream?zone=…` (SSE) on top of `bus.py` (built in Phase 2 for `/ws/events`).
+- ~~`GET /playback/stream?zone=…` (SSE)~~ play commands on the `/ws/events` WebSocket through `bus.py` (D8, amended in Phase 5).
 - `sources/replay.py` and `POST /scenarios/{name}/run` already exist (Phase 2); here they start driving the scheduler.
-- Frontend Zones page: one panel per zone with an `EventSource`, a sequential `<audio>` queue, a now-playing caption, and the next play time.
+- Frontend Zones page: one panel per zone fed from the page's WebSocket, a sequential `<audio>` queue, a now-playing caption, and the next play time.
 - **Tests (mock, `RELAY_TIME_SCALE=1000`):**
   - **A:** the severe message stops after the update, and the good-service message plays exactly 2×.
   - **B:** exactly 3 plays per zone at urgency levels 1, 2, 3. Resolving after play 1 stops it.

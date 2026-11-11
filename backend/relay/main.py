@@ -1,9 +1,12 @@
-"""FastAPI app. The lifespan creates the tables. The scheduler joins it in Phase 5."""
+"""FastAPI app. The lifespan creates the tables and runs the playback scheduler."""
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from relay import scheduler
 from relay.api import events as events_api
 from relay.api import playback as playback_api
 from relay.api import scenarios as scenarios_api
@@ -18,16 +21,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     db = make_engine(settings.relay_db_url)
     ctx = Context(conns=build_connectors(settings), settings=settings, engine=db)
+    playback = scheduler.State()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         init_db(db)
+        task = asyncio.create_task(scheduler.run(ctx, playback))
         yield
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     app = FastAPI(title="Relay", lifespan=lifespan)
     app.state.ctx = ctx
+    app.state.playback = playback
     app.include_router(events_api.build_router(ctx))
-    app.include_router(playback_api.build_router(db, settings))
+    app.include_router(playback_api.build_router(ctx, playback))
     app.include_router(scenarios_api.build_router(ctx))
     app.include_router(ws_api.build_router(ctx))
 

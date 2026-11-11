@@ -47,20 +47,20 @@ They need to see three things: why voice quality and multilingual TTS matter her
 2. Relay validates the payload against the typed schema for its event type.
 3. The script engine writes scripts for each language and urgency level. Each script passes the fact lock or is replaced by a template.
 4. The voice layer renders the audio. Audio is cached by content hash, so a repeat never costs a second TTS call.
-5. The scheduler creates playback jobs for the target zones, using the repeat policy for that event type.
+5. The scheduler creates playback jobs for the target zones, using the repeat policy for that event type. A high-severity event waits for an operator to approve it before its first play (R12); a routine one plays at once.
 6. Zone players in the browser play each language's clip in order. The chime is already stitched into the front of the first-language clip (ARCHITECTURE D18), so a sequence has one chime and the player adds none.
 
 ### F2. Staff note → announcement (human confirms)
 1. The agent types a free-text note into the console.
 2. The LLM (escalation model) extracts a typed event. Every extracted value must appear in the note text, or the field is left empty and flagged.
 3. The console shows the extracted fields and the generated English script. The agent edits fields if needed and clicks **Broadcast**.
-4. Flow continues from F1 step 3. Nothing from a staff note plays without a human click.
+4. Flow continues from F1 step 3. The event waits for an operator's **Approve** before its first play (R12). Nothing from a staff note plays without a human click.
 
 ### F3. Update
 1. A new version of an existing event arrives, keyed by `event_key` (for example, Jubilee goes from severe to minor delays).
 2. Relay generates new scripts and audio for the new version.
-3. Pending playback jobs for the old version are cancelled. A clip that is already playing finishes, because Relay never cuts audio mid-sentence.
-4. New jobs are scheduled.
+3. Pending playback jobs for the old version are cancelled, and its queued clips are dropped. A clip that is already playing finishes, because Relay never cuts audio mid-sentence.
+4. New jobs are scheduled. They replace the old ones; nothing stacks. An update with exactly the same facts is a duplicate and changes nothing (R14).
 
 ### F4. Resolve
 1. The operator clicks **Resolve**, or the feed reports a return to normal (for example, Jubilee shows Good Service).
@@ -134,17 +134,20 @@ Each scenario ships as a replay file in `backend/scenarios/` that posts timed ev
 | R5 | Per-language templates exist for every event type, urgency level and language. Templates are the fallback and the reference wording. |
 | R6 | Model routing: the default model writes scripts. The escalation model handles (a) the retry after a fact-lock failure and (b) all staff-note events. Both are configurable in `.env`. |
 | R7 | Every LLM call is logged with model, purpose, attempt, tokens, cost, latency and outcome. Every TTS render is logged with provider, model, characters, cost and cache hit. |
-| R8 | A zone plays one clip at a time. If several announcements are due, higher priority plays first. Clips are never cut mid-play. |
+| R8 | A zone plays one clip at a time, from a queue. If several announcements are due, higher priority plays first, in the order security > safety > paging > delays > info (security and safety are reserved: Relay makes no such announcements, §7). A higher-priority announcement preempts a lower one at the next clip boundary, and the interrupted announcement resumes afterwards. Clips are never cut mid-play. |
 | R9 | Updating or resolving an event cancels its pending plays within one scheduler tick (1 s). |
 | R10 | Live LLM calls have a timeout of 6 s. A timeout counts as a failure, and Relay falls back to the template so the announcement is not delayed. |
 | R11 | Passenger names are personal data. They are shown in the console and spoken, but are not written to the metrics view or logs. Audio and scripts for resolved pages are purged after `RELAY_PII_RETENTION_HOURS` (default 24). |
+| R12 | **Human in the loop:** staff-note events and high-severity events (line severe delays, part suspended, suspended) need an operator's approval before their first play. Routine structured events auto-play. Configurable per site and event type (`approval: risk | always | never`). |
+| R13 | **Audit log:** every play records what played (announcements and their script source, model and prompt version), where (zone), when (start and end), which event version, and who approved it (operator, `auto`, or `scenario runner`). `GET /playback/log`. No text and no names. |
+| R14 | An event identical to an active one (same site, type and facts) is a duplicate: no new version, no new audio, no new plays. |
 
 ## 7. Non-goals
 
 - **Emergency, evacuation or security announcements.** These are safety-critical and must stay pre-approved recordings. Relay refuses any event type outside R1.
 - **Integration with real PA hardware** (Dante, SIP paging, amplifiers, zone controllers). Browser panels stand in for zones.
 - **Integration with real airline or airport systems** (DCS, FIDS, AODB). Airport and bus events are simulated. Only TfL line status is live (Phase 7).
-- Authentication, user roles, multi-tenancy, audit-grade logging.
+- Authentication, user roles, multi-tenancy, tamper-proof audit logging. The play log (R13) is a plain table, and the approving operator's name is self-declared.
 - Free-form general announcements with no event type.
 - Voice cloning of staff, speech-to-text input, or a mobile app.
 - Production deployment, high availability, or horizontal scaling. Relay is a single process with SQLite.

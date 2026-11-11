@@ -21,6 +21,6 @@ policies:
     zones: [concourse, stand-b, stand-f]
     interval_s: 180
     duration_s: 1200
-    priority: 60
+    priority: info
 gazetteer:
   stations: [Victoria, Oxford Circus, Holborn, Bank, Stratford, Whitechapel, Aldwych, Marble Arch]

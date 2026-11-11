@@ -5,6 +5,7 @@ Sites are config, not tables (D12). Loaded once and cached.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -15,6 +16,20 @@ from relay.schemas import EVENT_TYPES
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 SITES_DIR = BACKEND_DIR / "sites"
 STATIC_DIR = BACKEND_DIR / "static"
+
+
+# Priority classes, highest first: a higher class preempts a lower one at the next clip boundary
+# (scheduler.py, D19). "security" and "safety" are reserved and no policy may use them: Relay
+# never makes those announcements (SPEC non-goals); the ranks exist so that the order is complete
+# and a pre-recorded safety system's messages would outrank everything Relay plays.
+PRIORITY = {"security": 100, "safety": 90, "paging": 70, "delays": 50, "info": 30}
+PriorityClass = Literal["paging", "delays", "info"]  # the classes a site policy may use
+RESOLUTION_PRIORITY = "info"  # "good service has resumed" and other resolution messages
+
+# Who must approve an event before its first play (jobs.approval_reason, D20).
+#   risk:   staff notes and high-severity events wait for an operator; the rest auto-play
+#   always: every event waits; never: nothing waits
+Approval = Literal["risk", "always", "never"]
 
 
 class Zone(BaseModel):
@@ -31,8 +46,13 @@ class Policy(BaseModel):
     max_plays: int | None = None
     duration_s: int | None = None  # the event expires (auto-resolves) after this long
     escalate: bool = False  # play urgency = min(plays_done + 1, 3)
-    priority: int = 50
+    priority: PriorityClass = "info"
+    approval: Approval = "risk"
     resolution_plays: int = 0
+
+    @property
+    def rank(self) -> int:
+        return PRIORITY[self.priority]
 
 
 class Gazetteer(BaseModel):
@@ -117,6 +137,9 @@ def load_site(path: Path) -> Site:
 @lru_cache
 def load_sites(directory: str = str(SITES_DIR)) -> dict[str, Site]:
     sites = [load_site(p) for p in sorted(Path(directory).glob("*.yaml"))]
+    zone_ids = [z.id for s in sites for z in s.zones]
+    if len(zone_ids) != len(set(zone_ids)):  # the scheduler and the zone players key on zone id
+        raise ValueError("zone ids must be unique across sites")
     return {s.id: s for s in sites}
 
 

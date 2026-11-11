@@ -1,5 +1,5 @@
 // All backend calls live here. The dev server proxies /api to the backend.
-import type { Health, RelayEvent, RunStatus, ScenarioList, StateMessage } from "./types";
+import type { Health, RelayEvent, RunStatus, ScenarioList, StateMessage, Zone } from "./types";
 
 const BASE = "/api";
 
@@ -19,12 +19,16 @@ export const getHealth = () => request<Health>("/health");
 export const listEvents = () => request<RelayEvent[]>("/events");
 export const getEvent = (id: number) => request<RelayEvent>(`/events/${id}`);
 export const resolveEvent = (id: number) => request<RelayEvent>(`/events/${id}/resolve`, post());
+export const approveEvent = (id: number, operator: string) =>
+  request<RelayEvent>(`/events/${id}/approve`, post({ operator }));
 export const listScenarios = () => request<ScenarioList>("/scenarios");
-export const runScenario = (name: string, speed: number) =>
-  request<RunStatus>(`/scenarios/${name}/run?speed=${speed}`, post());
+export const runScenario = (name: string, speed: number, autoApprove: boolean) =>
+  request<RunStatus>(`/scenarios/${name}/run?speed=${speed}&auto_approve=${autoApprove}`, post());
+export const listZones = () => request<Zone[]>("/playback/zones");
 export const audioSrc = (url: string) => BASE + url;
 
-/** Subscribe to state changes. Returns a function that closes the socket. */
+/** Subscribe to the one real-time channel: state changes and play commands (D8).
+ * Returns a function that closes the socket. */
 export function watchEvents(onMessage: (m: StateMessage) => void): () => void {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}${BASE}/ws/events`);

@@ -64,7 +64,7 @@ def test_clean_run_uses_default_model_once(settings):
 
 def test_plan_carries_policy_expiry_and_facts(settings):
     plan = run(page_event(), MockLLMProvider(), settings)
-    assert plan.priority == 90 and plan.repeat_interval_s == 120 and plan.max_plays == 3
+    assert plan.priority == 70 and plan.repeat_interval_s == 120 and plan.max_plays == 3
     assert plan.escalate and plan.zones == ["gate-23", "concourse-b"]
     assert plan.expires_at == NOW + timedelta(seconds=360)
     assert plan.facts_used == [

@@ -1,8 +1,10 @@
-"""WebSocket /ws/events: pushes event state changes to the console (created, updated, resolved).
+"""WebSocket /ws/events: the one real-time channel (D8). Everything the bus publishes goes here.
 
-On connect the client gets a snapshot of the active events, then one small message per change
-(ids and state only, no names; the client re-fetches details). Audio playback commands are a
-separate stream (Phase 5, SSE, D8).
+On connect the client gets a snapshot of the active events, then one small message per change:
+  event.created | event.updated | event.resolved | event.approved   (console state changes)
+  play                                                             (scheduler: one clip in one zone)
+Ids, urls and state only, never names: the client re-fetches details (captions included) over HTTP.
+Each client filters what it needs (the console listens to event.*, the zone players to play).
 """
 
 import asyncio

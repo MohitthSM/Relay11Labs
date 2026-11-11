@@ -2,8 +2,11 @@
 
 One call does the whole path (SPEC F1):
   validate -> Event row -> script engine (writes LLMCall + Announcement rows)
-  -> voice.render_many (clips) -> state-change message on the bus.
-Scheduling comes in Phase 5; nothing here plays audio.
+  -> voice.render_many (clips) -> playback jobs (jobs.py) -> state-change message on the bus.
+The scheduler (scheduler.py) plays the jobs; nothing here plays audio.
+
+Replace, never stack (D21): an identical event is a duplicate and changes nothing; an update
+cancels the previous version's jobs before the new version's are created; resolve cancels them.
 
 Logging uses event ids only. An event_key can contain a passenger name.
 """
@@ -15,9 +18,9 @@ from typing import Any
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
-from relay import bus, timeutil, voice
+from relay import bus, jobs, timeutil, voice
 from relay.context import Context
-from relay.models import ACTIVE, RESOLVED, SUPERSEDED, Announcement, Event, LLMCall
+from relay.models import ACTIVE, PENDING, RESOLVED, SUPERSEDED, Announcement, Event, LLMCall
 from relay.schemas import EventInput, LinePayload, PassengerPagePayload, StandChangePayload
 from relay.script.engine import ScriptPlan, build_context, generate
 from relay.sites import Site, load_sites
@@ -63,6 +66,19 @@ def active_event(session: Session, event_key: str) -> Event | None:
     ).first()
 
 
+def find_duplicate(session: Session, site_id: str, payload: dict[str, Any]) -> Event | None:
+    """The active event at this site with exactly these facts, if any (D21). A bad payload
+    raises ValidationError."""
+    probe = EventInput(event_key="-", site_id=site_id, payload=payload)  # type: ignore[arg-type]
+    facts = probe.payload.model_dump()
+    rows = session.exec(
+        select(Event).where(
+            Event.state == ACTIVE, Event.site_id == site_id, Event.type == probe.type
+        )
+    ).all()
+    return next((e for e in rows if e.payload == facts), None)
+
+
 def create(
     session: Session,
     ctx: Context,
@@ -73,9 +89,14 @@ def create(
     source: str = "api",
     staff_note: str | None = None,
 ) -> Event:
-    """Version 1 of a new event. A bad payload raises ValidationError (the API answers 422)."""
+    """Version 1 of a new event. A bad payload raises ValidationError (the API answers 422).
+    An event identical to an active one is a duplicate: the active one is returned unchanged."""
     probe = EventInput(event_key=event_key or "-", site_id=site_id, payload=payload)  # type: ignore[arg-type]
     site = get_site_for(site_id, probe.type)
+    duplicate = find_duplicate(session, site_id, payload)
+    if duplicate:
+        log.info("event %s: identical event ignored", duplicate.id)
+        return duplicate
     key = event_key or derive_key(probe.payload)
     if active_event(session, key):
         raise EventError(409, "an active event with this key exists: update or resolve it")
@@ -85,7 +106,8 @@ def create(
 def update(
     session: Session, ctx: Context, event_key: str, payload: dict[str, Any], *, source: str = "api"
 ) -> Event:
-    """A new version of the active event with this key. The previous version is superseded."""
+    """A new version of the active event with this key. The previous version is superseded and
+    its jobs are cancelled. The same facts again change nothing: the current version returns."""
     current = active_event(session, event_key)
     if current is None:
         raise EventError(404, "no active event with this key")
@@ -93,9 +115,14 @@ def update(
     if probe.type != current.type:
         raise EventError(422, "an update cannot change the event type")
     site = get_site_for(current.site_id, current.type)
+    if probe.payload.model_dump() == current.payload:
+        log.info("event %s: identical update ignored", current.id)
+        return current
     previous = _previous_drafts(session, current)
     current.state = SUPERSEDED
     session.add(current)
+    assert current.id is not None
+    jobs.cancel_jobs(session, current.id)
     return _new_version(
         session, ctx, site, event_key, probe.payload.model_dump(), current.version + 1,
         source, None, previous=previous,
@@ -111,8 +138,11 @@ def resolve(
     if event is None:
         raise EventError(404, "no active event with this key")
     site = get_site_for(event.site_id, event.type)
-    event.state, event.resolved_at = RESOLVED, timeutil.now()
+    now = timeutil.now()
+    event.state, event.resolved_at = RESOLVED, now
     session.add(event)
+    assert event.id is not None
+    jobs.cancel_jobs(session, event.id)
     if site.policies[event.type].resolution_plays > 0 and event.type == "line_status":
         wanted = payload or {"type": "line_status", "line": event.payload["line"]}
         wanted = {**wanted, "status": "good_service"}
@@ -120,10 +150,26 @@ def resolve(
             raise EventError(422, "a line is resolved with status good_service")
         res = EventInput(event_key=event_key, site_id=event.site_id, payload=wanted)  # type: ignore[arg-type]
         _announce(session, ctx, site, event, res, is_resolution=True)
+        jobs.schedule_event(session, event, site, now, resolution=True)
     session.commit()
     session.refresh(event)
     _publish("event.resolved", event)
     log.info("event %s resolved", event.id)
+    return event
+
+
+def approve(session: Session, event_id: int, operator: str) -> Event:
+    """An operator approves an event that waits (D20): its held jobs play from now."""
+    event = session.get(Event, event_id)
+    if event is None:
+        raise EventError(404, "no such event")
+    if event.approval != PENDING or not jobs.held_jobs(session, event_id):
+        raise EventError(409, "this event is not waiting for approval")
+    count = jobs.release_held(session, event, operator, timeutil.now())
+    session.commit()
+    session.refresh(event)
+    _publish("event.approved", event)
+    log.info("event %s approved: %d jobs released", event.id, count)
     return event
 
 
@@ -149,12 +195,13 @@ def _new_version(
         payload=payload,
         source=source,
         staff_note=staff_note,
-        priority=site.policies[payload["type"]].priority,
+        priority=site.policies[payload["type"]].rank,
     )
     session.add(event)
     session.flush()  # the id is needed for the child rows
     ev_input = EventInput(event_key=key, site_id=site.id, version=version, payload=payload)  # type: ignore[arg-type]
     _announce(session, ctx, site, event, ev_input, previous=previous or [])
+    jobs.schedule_event(session, event, site, timeutil.now())
     session.commit()
     session.refresh(event)
     _publish("event.created" if version == 1 else "event.updated", event)
@@ -249,5 +296,6 @@ def _publish(kind: str, event: Event) -> None:
             "event_type": event.type,
             "version": event.version,
             "state": event.state,
+            "approval": event.approval,
         }
     )

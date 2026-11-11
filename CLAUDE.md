@@ -208,7 +208,7 @@ Voice ids and pronunciation dictionary locators are set per site in `sites/*.yam
 - The header always shows `LLM: live|mock · TTS: live|mock` from `GET /health`.
 
 **Git**
-- Small commits per phase step. Never commit `.env`, `data/`, `node_modules/` or generated audio.
+- Small commits per phase step. Never commit `.env`, `data/`, `node_modules/` or generated audio, except the real ElevenLabs samples in `docs/samples/` (user decision, Phase 8: paid for once, listed in `manifest.json`, seeded into the cache so the demo replays them at zero cost).
 
 ## Definition of done (every change)
 

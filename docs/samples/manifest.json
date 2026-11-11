@@ -1,5 +1,36 @@
 {
- "clips": [],
+ "clips": [
+  {
+   "id": "97f8e516223e524b2f2d70c45139b075e8c3ac22db54f1d9c9cf05eaf837ff11",
+   "file": "b_en_u1.mp3",
+   "kind": "announcement",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 0,
+   "cost_usd": 0.0,
+   "duration_s": 11.102,
+   "parts": [
+    "63e8aae5d5415e6335873410f9caa8ab5d68cbfe2d4e4c667e6a06b2575db53e"
+   ]
+  },
+  {
+   "id": "63e8aae5d5415e6335873410f9caa8ab5d68cbfe2d4e4c667e6a06b2575db53e",
+   "file": "cache/63e8aae5d5415e6335873410f9caa8ab5d68cbfe2d4e4c667e6a06b2575db53e.mp3",
+   "kind": "segment",
+   "permanent": false,
+   "provider": "elevenlabs",
+   "model_id": "eleven_v4_turbo",
+   "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+   "language": "en",
+   "characters": 124,
+   "cost_usd": 0.00496,
+   "duration_s": 9.639,
+   "parts": []
+  }
+ ],
  "ledger": [
   {
    "at": "2026-11-11T16:40:00+00:00",
@@ -15,6 +46,21 @@
     }
    ],
    "total": 53
+  },
+  {
+   "at": "2026-11-11T16:51:41+00:00",
+   "what": "render_samples.py",
+   "clips": [
+    {
+     "clip": "b_en_u1",
+     "model": "eleven_v4_turbo",
+     "script": "llm",
+     "characters": 124,
+     "ttfa_ms": 2216,
+     "total_ms": 2819
+    }
+   ],
+   "total": 124
   }
  ]
 }

@@ -9,7 +9,8 @@ Mode = Literal["auto", "mock", "live"]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The repo-root .env (docker compose, README) and backend/.env both work; the later file wins.
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
     anthropic_api_key: str = ""
     elevenlabs_api_key: str = ""

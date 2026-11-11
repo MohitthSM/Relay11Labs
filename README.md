@@ -43,6 +43,54 @@ Open <http://localhost:5173>.
 
 **To go live:** `cp .env.example .env` and set `ANTHROPIC_API_KEY` and/or `ELEVENLABS_API_KEY`. Each provider switches to live on its own when its key is present. The header always shows which providers are live (`LLM: live|mock · TTS: live|mock`).
 
+## Running live locally (Claude and ElevenLabs)
+
+The cloud environment this was built in can inject an ElevenLabs key but not an Anthropic key, so the Claude checks run on your machine. Keys go in `.env` only (git-ignored).
+
+```bash
+cp .env.example .env
+```
+
+Set `ANTHROPIC_API_KEY=` and `ELEVENLABS_API_KEY=` in `.env`. The repo-root `.env` and `backend/.env` both work; the backend one wins.
+
+**Live smoke tests.** These are skipped unless `-m live` is passed and a key is set.
+
+Claude only: one batched scenario B call on `claude-haiku-5-5` with structured output, about $0.001:
+
+```bash
+cd backend && uv run pytest -m live -q -k claude
+```
+
+Both providers. The ElevenLabs test bills one short clip, about 53 characters:
+
+```bash
+cd backend && uv run pytest -m live -q
+```
+
+**Samples with Claude-written scripts.** With `ANTHROPIC_API_KEY` set, `render_samples.py` takes its scripts from Claude: Haiku first, Sonnet on a fact-lock retry, and the template if both fail. Claude's wording differs from the templates, so the committed clips don't match and the plan shows new characters. Claude can also word a script differently on each run, so every run bills again. Keep them out of the committed set:
+
+The plan (no audio is rendered: the script engine calls Claude, but nothing is sent to ElevenLabs):
+
+```bash
+cd backend && uv run python scripts/render_samples.py --out ../docs/samples-llm
+```
+
+Render, within your budget:
+
+```bash
+cd backend && uv run python scripts/render_samples.py --out ../docs/samples-llm --go --budget 5000
+```
+
+`report.md` in that folder says, per clip, whether the script came from `llm` or `template`, the characters billed and the time to first audio.
+
+**Replaying the committed samples at zero cost.** The app seeds `docs/samples/` into its audio cache at start-up when TTS is live. Those clips were voiced from the template wording, so they are only reused while the LLM is in mock mode. Start the backend with:
+
+```bash
+RELAY_LLM_MODE=mock make dev
+```
+
+With Claude live, every new event gets fresh wording and is voiced (and billed) again.
+
 ## The demo (5 minutes)
 
 | | Scenario | What it shows |

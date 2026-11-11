@@ -1,9 +1,13 @@
 import os
 
-# Keep a real key for `-m live` tests, then force mock mode and fast time BEFORE relay is
-# imported anywhere.
-os.environ["RELAY_LIVE_ANTHROPIC_API_KEY"] = os.environ.get("ANTHROPIC_API_KEY", "")
-os.environ["RELAY_LIVE_ELEVENLABS_API_KEY"] = os.environ.get("ELEVENLABS_API_KEY", "")
+# Keep a real key for `-m live` tests (from the environment or .env, as the app reads them), then
+# force mock mode and fast time. An environment variable beats .env, so the empty keys and the
+# forced modes below hold for every other test.
+from relay.config import Settings as _Settings  # noqa: E402  (reads no relay state)
+
+_keys = _Settings()
+os.environ["RELAY_LIVE_ANTHROPIC_API_KEY"] = _keys.anthropic_api_key
+os.environ["RELAY_LIVE_ELEVENLABS_API_KEY"] = _keys.elevenlabs_api_key
 os.environ.update(
     RELAY_LLM_MODE="mock", RELAY_TTS_MODE="mock", RELAY_TIME_SCALE="1000",
     ANTHROPIC_API_KEY="", ELEVENLABS_API_KEY="", RELAY_MOCK_HALLUCINATE="false",

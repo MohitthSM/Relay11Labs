@@ -44,6 +44,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = ROOT / "scenarios"
 DEFAULT_OUT = ROOT.parent / "docs" / "samples"
 B_SLOTS = [("en", 1), ("en", 3), ("es", 1), ("fr", 1)]
+# --all-b: the rest of scenario B, so the whole page (D4: every level and language at ingest)
+# plays from the cache
+B_REST = [("en", 2), ("es", 2), ("fr", 2), ("es", 3), ("fr", 3)]
 
 
 @dataclass
@@ -66,7 +69,7 @@ def scripts(event: EventInput, site: Site, llm, settings: Settings):
     return context.languages[0], plan.scripts
 
 
-def build_jobs(settings: Settings, llm) -> list[Job]:
+def build_jobs(settings: Settings, llm, all_b: bool = False) -> list[Job]:
     sites = load_sites()
     airport, tube = sites["airport"], sites["tube_station"]
     jobs: list[Job] = []
@@ -74,7 +77,7 @@ def build_jobs(settings: Settings, llm) -> list[Job]:
     page = EventInput.of(event_key="b", site_id="airport", payload=first_payload("b_ba117"))
     first, slots = scripts(page, airport, llm, settings)
     by_slot = {(s.language, s.urgency): s for s in slots}
-    for lang, urgency in B_SLOTS:
+    for lang, urgency in B_SLOTS + (B_REST if all_b else []):
         s = by_slot[(lang, urgency)]
         item = voice.Item(s.spoken_text, lang, voice.render_kind(urgency),
                           chime=lang == first, urgency=urgency)  # fmt: skip
@@ -134,6 +137,11 @@ def export(session: Session, out_dir: Path, manifest: dict, done: list[tuple[Job
         clip = session.get(AudioClip, clip_id)
         if clip is not None and clip.id not in known:
             add(clip, f"{job.stem}{Path(clip.path).suffix}")
+    for job, clip_id in done:  # a job whose clip was already committed under another name
+        clip = session.get(AudioClip, clip_id)
+        if clip is not None and not (out_dir / f"{job.stem}{Path(clip.path).suffix}").exists():
+            shutil.copyfile(voice.clip_path(job.settings, clip),
+                            out_dir / f"{job.stem}{Path(clip.path).suffix}")  # fmt: skip
     for _, clip_id in done:
         clip = session.get(AudioClip, clip_id)
         for part_id in clip.parts if clip else []:
@@ -151,6 +159,8 @@ def main() -> int:
     parser.add_argument("--go", action="store_true", help="render (default: show the plan)")
     parser.add_argument("--budget", type=int, default=5000, help="characters, all runs together")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--only", default="", help="comma-separated clip names, e.g. b_en_u1")
+    parser.add_argument("--all-b", action="store_true", help="add the rest of scenario B")
     args = parser.parse_args()
     base = get_settings()
     tts, llm = build_tts(base), build_llm(base)
@@ -168,7 +178,14 @@ def main() -> int:
         init_db(engine)
         with Session(engine) as session:
             voice.seed_cache(session, settings, args.out)
-            jobs = build_jobs(settings, llm)
+            jobs = build_jobs(settings, llm, args.all_b)
+            if args.only:
+                wanted = {x.strip() for x in args.only.split(",") if x.strip()}
+                unknown = wanted - {j.stem for j in jobs}
+                if unknown:
+                    print(f"unknown clip(s): {', '.join(sorted(unknown))}")
+                    return 2
+                jobs = [j for j in jobs if j.stem in wanted]
             planned = plan(session, tts, jobs)
             print(f"\n{'clip':<34} {'model':<16} {'chars':>6}")
             for job, chars in zip(jobs, planned, strict=True):
